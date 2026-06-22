@@ -117,14 +117,32 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
 
   const saveEdits = async () => {
     try {
-      await updateSale(sale.id, editedItems);
-      // Recalculate local sale object
-      const subtotal = editedItems.reduce((a, c) => a + (c.sellingPrice * c.qty * (1 - (c.discount || 0) / 100)), 0);
-      const discount = editedItems.reduce((a, c) => a + c.sellingPrice * c.qty * ((c.discount || 0) / 100), 0);
-      const gst = subtotal * (18 / 118);
-      const grandTotal = subtotal;
+      let subtotal = 0;
+      let gst = 0;
+      
+      editedItems.forEach(c => {
+        const qty = Number(c.qty) || 0;
+        const price = Number(c.sellingPrice) || 0;
+        const itemGstPct = Number(c.gst) || 0;
+        subtotal += price * qty;
+        gst += (price * qty) * (itemGstPct / 100);
+      });
 
-      setSale({ ...sale, items: editedItems, subtotal: subtotal - gst, gst, discount, grandTotal });
+      let discount = 0;
+      const billDiscount = sale.billDiscount || { type: 'none', value: 0 };
+      const val = Number(billDiscount.value) || 0;
+      if (billDiscount.type === 'percent') {
+        discount = (subtotal + gst) * (val / 100);
+      } else if (billDiscount.type === 'flat') {
+        discount = val;
+      }
+
+      const grandTotal = Math.max(0, subtotal + gst - discount);
+      
+      const updatedSale = { items: editedItems, subtotal, gst, discount, grandTotal };
+      await updateSale(sale.id, updatedSale);
+
+      setSale({ ...sale, ...updatedSale });
       setIsEditing(false);
       showToast('Bill updated successfully!', 'success');
     } catch (err) {
@@ -141,9 +159,30 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
   };
 
   const currentItems = isEditing ? editedItems : sale.items;
-  const currentSubtotal = isEditing 
-    ? editedItems.reduce((a, c) => a + (c.sellingPrice * c.qty * (1 - (c.discount || 0) / 100)), 0)
-    : sale.grandTotal;
+  
+  let previewSubtotal = 0;
+  let previewGst = 0;
+  currentItems.forEach(c => {
+    const qty = Number(c.qty) || 0;
+    const price = Number(c.sellingPrice) || 0;
+    const itemGstPct = Number(c.gst) || 0;
+    previewSubtotal += price * qty;
+    previewGst += (price * qty) * (itemGstPct / 100);
+  });
+
+  let previewDiscount = 0;
+  const billDiscount = sale.billDiscount || { type: 'none', value: 0 };
+  const val = Number(billDiscount.value) || 0;
+  if (billDiscount.type === 'percent') {
+    previewDiscount = (previewSubtotal + previewGst) * (val / 100);
+  } else if (billDiscount.type === 'flat') {
+    previewDiscount = val;
+  }
+  
+  const currentSubtotal = isEditing ? previewSubtotal : sale.subtotal;
+  const currentGst = isEditing ? previewGst : sale.gst;
+  const currentDiscount = isEditing ? previewDiscount : sale.discount;
+  const currentGrandTotal = isEditing ? Math.max(0, previewSubtotal + previewGst - previewDiscount) : sale.grandTotal;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -236,13 +275,14 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
           {/* Totals */}
           <div className="totals-section">
             <div className="receipt-row" style={{ fontSize: '12px' }}><span>Subtotal:</span><span>₹{currentSubtotal.toFixed(2)}</span></div>
-            {sale.discount > 0 && <div className="receipt-row" style={{ fontSize: '12px', color: 'green' }}><span>Discount Saved:</span><span>-₹{sale.discount.toFixed(2)}</span></div>}
+            <div className="receipt-row" style={{ fontSize: '12px' }}><span>GST:</span><span>₹{currentGst.toFixed(2)}</span></div>
+            {currentDiscount > 0 && <div className="receipt-row" style={{ fontSize: '12px', color: 'green' }}><span>Discount Saved:</span><span>-₹{currentDiscount.toFixed(2)}</span></div>}
           </div>
           
           <div className="receipt-divider" style={{ borderStyle: 'solid' }}></div>
           <div className="receipt-row" style={{ fontSize: '15px', fontWeight: 'bold' }}>
             <span>GRAND TOTAL:</span>
-            <span>₹{currentSubtotal.toFixed(2)}</span>
+            <span>₹{currentGrandTotal.toFixed(2)}</span>
           </div>
           <div className="receipt-divider" style={{ borderStyle: 'solid' }}></div>
 

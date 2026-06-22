@@ -5,15 +5,28 @@ import { Search, Scan, Trash2, X, ShoppingBag } from 'lucide-react';
 import Receipt from '../components/Receipt';
 import { showToast } from '../components/Toast';
 
-function calcTotals(cart) {
-  const subtotal = cart.reduce((a, c) => {
-    const price = c.sellingPrice * c.qty;
-    const disc = price * ((c.discount || 0) / 100);
-    return a + price - disc;
-  }, 0);
-  const discount = cart.reduce((a, c) => a + c.sellingPrice * c.qty * ((c.discount || 0) / 100), 0);
-  const grandTotal = subtotal;
-  return { subtotal, gst: 0, grandTotal, discount };
+function calcTotals(cart, billDiscount = { type: 'none', value: 0 }) {
+  let subtotal = 0;
+  let gst = 0;
+  
+  cart.forEach(c => {
+    const qty = Number(c.qty) || 0;
+    const price = Number(c.sellingPrice) || 0;
+    const itemGstPct = Number(c.gst) || 0;
+    subtotal += price * qty;
+    gst += (price * qty) * (itemGstPct / 100);
+  });
+
+  let discount = 0;
+  const val = Number(billDiscount.value) || 0;
+  if (billDiscount.type === 'percent') {
+    discount = (subtotal + gst) * (val / 100);
+  } else if (billDiscount.type === 'flat') {
+    discount = val;
+  }
+
+  const grandTotal = Math.max(0, subtotal + gst - discount);
+  return { subtotal, gst, grandTotal, discount };
 }
 
 export default function Billing() {
@@ -27,6 +40,7 @@ export default function Billing() {
   const [catFilter, setCatFilter] = useState('All');
   const barcodeRef = useRef();
   const [editingTotal, setEditingTotal] = useState(null); // { id, value }
+  const [billDiscount, setBillDiscount] = useState({ type: 'none', value: 0 });
 
   const startEditTotal = (item) => {
     setEditingTotal({ id: item.id, value: (item.sellingPrice * item.qty).toFixed(0) });
@@ -109,7 +123,7 @@ export default function Billing() {
     }
   };
 
-  const { subtotal, gst, grandTotal, discount } = calcTotals(state.cart);
+  const { subtotal, gst, grandTotal, discount } = calcTotals(state.cart, billDiscount);
   const change = cashPaid ? Math.max(0, parseFloat(cashPaid) - grandTotal) : 0;
 
   const generateBill = async () => {
@@ -125,6 +139,7 @@ export default function Billing() {
       date: saleDate,
       items: state.cart,
       subtotal, gst, grandTotal, discount,
+      billDiscount,
       paymentMode,
       cashPaid: paymentMode === 'Cash' ? parseFloat(cashPaid) || grandTotal : 0,
     };
@@ -271,6 +286,39 @@ export default function Billing() {
             {/* Totals + Payment */}
             <div className="totals-card">
               <div className="total-row"><span>{tx.subtotal}</span><span>₹{subtotal.toFixed(2)}</span></div>
+              <div className="total-row"><span>GST</span><span>₹{gst.toFixed(2)}</span></div>
+              
+              {/* Discount Controls */}
+              <div style={{ marginTop: '10px', marginBottom: '10px', padding: '10px', background: 'var(--bg2)', borderRadius: '8px' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text3)', marginBottom: '6px' }}>Apply Discount</div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <select 
+                    className="form-input" 
+                    style={{ flex: 1, padding: '6px' }}
+                    value={billDiscount.type}
+                    onChange={e => setBillDiscount({ ...billDiscount, type: e.target.value })}
+                  >
+                    <option value="none">No Discount</option>
+                    <option value="flat">Flat Amount (₹)</option>
+                    <option value="percent">Percentage (%)</option>
+                  </select>
+                  {billDiscount.type !== 'none' && (
+                    <input 
+                      type="number" 
+                      className="form-input" 
+                      style={{ flex: 1, padding: '6px' }}
+                      placeholder="Value"
+                      value={billDiscount.value || ''}
+                      onChange={e => setBillDiscount({ ...billDiscount, value: e.target.value })}
+                    />
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                  <button className="btn btn-ghost btn-sm" style={{ flex: 1, fontSize: '0.7rem' }} onClick={() => setBillDiscount({ type: 'percent', value: 5 })}>Bulk 5%</button>
+                  <button className="btn btn-ghost btn-sm" style={{ flex: 1, fontSize: '0.7rem' }} onClick={() => setBillDiscount({ type: 'percent', value: 10 })}>Bulk 10%</button>
+                </div>
+              </div>
+
               {discount > 0 && <div className="total-row"><span>{tx.discount}</span><span style={{ color: 'var(--green)' }}>-₹{discount.toFixed(2)}</span></div>}
               <div className="total-row grand"><span>{tx.grandTotal}</span><span>₹{grandTotal.toFixed(2)}</span></div>
 

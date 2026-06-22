@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AppProvider } from './store/AppContext';
 import { ToastProvider } from './components/Toast';
 import Sidebar from './components/Sidebar';
@@ -7,9 +7,31 @@ import Billing from './pages/Billing';
 import Inventory from './pages/Inventory';
 import ImportExcel from './pages/ImportExcel';
 import SalesReport from './pages/SalesReport';
+import Login from './pages/Login';
 
 export default function App() {
   const [page, setPage] = useState('billing');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    // Check if user is already authenticated in this session
+    if (sessionStorage.getItem('cs_auth_session')) {
+      setIsAuthenticated(true);
+    }
+  }, []);
+
+  const handleLogin = () => {
+    setIsAuthenticated(true);
+    sessionStorage.setItem('cs_auth_session', 'true');
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <ToastProvider>
+        <Login onLogin={handleLogin} />
+      </ToastProvider>
+    );
+  }
 
   const pages = {
     dashboard: Dashboard,

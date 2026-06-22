@@ -91,6 +91,16 @@ function ProductModal({ product, allProducts, onSave, onClose, tx }) {
               <label className="form-label">{tx.stock} (qty)</label>
               <input className="form-input" type="number" step="any" value={form.stock} onChange={e => set('stock', e.target.value)} style={{ background: 'rgba(5, 150, 105, 0.1)', fontWeight: 'bold' }} />
             </div>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">GST (%)</label>
+              <select className="form-input" value={form.gst !== undefined ? form.gst : 18} onChange={e => set('gst', Number(e.target.value))}>
+                <option value={0}>0%</option>
+                <option value={5}>5%</option>
+                <option value={12}>12%</option>
+                <option value={18}>18%</option>
+                <option value={28}>28%</option>
+              </select>
+            </div>
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-ghost" onClick={onClose}>{tx.cancel}</button>
@@ -184,6 +194,7 @@ export default function Inventory() {
                   <th>{tx.mrp}</th>
                   <th>{tx.sellingPrice}</th>
                   <th>{tx.purchasePrice}</th>
+                  <th>GST</th>
                   <th>{tx.stock}</th>
                   <th>Actions</th>
                 </tr>
@@ -201,6 +212,7 @@ export default function Inventory() {
                     <td>₹{p.mrp || '—'}</td>
                     <td style={{ fontWeight: 600, color: 'var(--primary)' }}>₹{p.sellingPrice}</td>
                     <td style={{ color: 'var(--text3)' }}>₹{p.purchasePrice || '—'}</td>
+                    <td>{p.gst || 0}%</td>
                     <td>{getStockBadge(p.stock || 0)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 6 }}>

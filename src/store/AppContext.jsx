@@ -1,10 +1,38 @@
 import { createContext, useContext, useReducer, useEffect } from 'react';
+import CryptoJS from 'crypto-js';
 
 const AppContext = createContext(null);
+const SECRET_KEY = 'cosmo_store_super_secret_key_2026';
+
+function encryptData(data) {
+  try {
+    return CryptoJS.AES.encrypt(JSON.stringify(data), SECRET_KEY).toString();
+  } catch (e) {
+    return '[]';
+  }
+}
+
+function decryptData(key) {
+  try {
+    const data = localStorage.getItem(key);
+    if (!data) return [];
+    const bytes = CryptoJS.AES.decrypt(data, SECRET_KEY);
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    return JSON.parse(decrypted);
+  } catch (e) {
+    // Fallback if data is not encrypted (e.g. from previous version)
+    try {
+      const fallback = localStorage.getItem(key);
+      return fallback ? JSON.parse(fallback) : [];
+    } catch {
+      return [];
+    }
+  }
+}
 
 const initialState = {
-  products: JSON.parse(localStorage.getItem('cs_products') || '[]'),
-  sales: JSON.parse(localStorage.getItem('cs_sales') || '[]'),
+  products: decryptData('cs_products'),
+  sales: decryptData('cs_sales'),
   cart: [],
   editingSaleId: null,
   lang: localStorage.getItem('cs_lang') || 'en',
@@ -16,11 +44,11 @@ function reducer(state, action) {
   switch (action.type) {
     case 'SET_PRODUCTS':
       newState = { ...state, products: action.payload };
-      localStorage.setItem('cs_products', JSON.stringify(action.payload));
+      localStorage.setItem('cs_products', encryptData(action.payload));
       return newState;
     case 'SET_SALES':
       newState = { ...state, sales: action.payload };
-      localStorage.setItem('cs_sales', JSON.stringify(action.payload));
+      localStorage.setItem('cs_sales', encryptData(action.payload));
       return newState;
     case 'ADD_TO_CART': {
       const existing = state.cart.find(c => c.id === action.payload.id);
@@ -127,18 +155,10 @@ export function AppProvider({ children }) {
     dispatch({ type: 'CLEAR_CART' });
   };
 
-  const updateSale = async (saleId, updatedItems) => {
-    const subtotal = updatedItems.reduce((a, c) => {
-      const price = c.sellingPrice * c.qty;
-      const disc = price * ((c.discount || 0) / 100);
-      return a + price - disc;
-    }, 0);
-    const discount = updatedItems.reduce((a, c) => a + c.sellingPrice * c.qty * ((c.discount || 0) / 100), 0);
-    const grandTotal = subtotal;
-
+  const updateSale = async (saleId, updatedSaleData) => {
     const newSales = state.sales.map(s => {
       if (s.id === saleId) {
-        return { ...s, items: updatedItems, subtotal, gst: 0, discount, grandTotal };
+        return { ...s, ...updatedSaleData };
       }
       return s;
     });
