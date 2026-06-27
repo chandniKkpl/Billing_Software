@@ -30,17 +30,35 @@ function calcTotals(cart, billDiscount = { type: 'none', value: 0 }) {
 }
 
 export default function Billing() {
-  const { state, dispatch, completeSale } = useApp();
+  const { state, dispatch, completeSale, addCustomer } = useApp();
   const tx = useT(state.lang);
   const [search, setSearch] = useState('');
   const [barcode, setBarcode] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
+  const [bankDetails, setBankDetails] = useState({
+    utr: '',
+    chequeNo: '',
+    bankName: '',
+    date: new Date().toISOString().split('T')[0]
+  });
   const [cashPaid, setCashPaid] = useState('');
   const [receipt, setReceipt] = useState(null);
   const [catFilter, setCatFilter] = useState('All');
   const barcodeRef = useRef();
   const [editingTotal, setEditingTotal] = useState(null); // { id, value }
   const [billDiscount, setBillDiscount] = useState({ type: 'none', value: 0 });
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' });
+  const [showOfferPopup, setShowOfferPopup] = useState(false);
+
+  const selectedCustomer = state.customers?.find(c => c.id === selectedCustomerId);
+
+  useEffect(() => {
+    if (selectedCustomer && selectedCustomer.type === 'old') {
+      setShowOfferPopup(true);
+    }
+  }, [selectedCustomerId]);
 
   const startEditTotal = (item) => {
     setEditingTotal({ id: item.id, value: (item.sellingPrice * item.qty).toFixed(0) });
@@ -134,6 +152,19 @@ export default function Billing() {
     const saleId = existingSale ? existingSale.id : Date.now().toString();
     const saleDate = existingSale ? existingSale.date : new Date().toISOString();
 
+    let finalBankInfo = '';
+    if (['RTGS', 'NEFT'].includes(paymentMode)) {
+      if (!bankDetails.utr || !bankDetails.date) {
+        return showToast(`Please enter UTR Number and Date for ${paymentMode}`, 'error');
+      }
+      finalBankInfo = `UTR: ${bankDetails.utr} | Date: ${bankDetails.date}`;
+    } else if (paymentMode === 'Cheque') {
+      if (!bankDetails.chequeNo || !bankDetails.bankName || !bankDetails.date) {
+        return showToast('Please enter Cheque Number, Bank Name, and Date', 'error');
+      }
+      finalBankInfo = `Chq: ${bankDetails.chequeNo} | Bank: ${bankDetails.bankName} | Date: ${bankDetails.date}`;
+    }
+
     const sale = {
       id: saleId,
       date: saleDate,
@@ -141,12 +172,21 @@ export default function Billing() {
       subtotal, gst, grandTotal, discount,
       billDiscount,
       paymentMode,
+      bankInfo: finalBankInfo,
+      customerId: selectedCustomerId || null,
       cashPaid: paymentMode === 'Cash' ? parseFloat(cashPaid) || grandTotal : 0,
     };
+    if (paymentMode === 'Debt' && !selectedCustomerId) {
+      showToast('Please select a customer for Debt', 'error');
+      return;
+    }
     try {
       await completeSale(sale);
       setReceipt(sale);
+      setPaymentMode('Cash');
+      setBankDetails({ utr: '', chequeNo: '', bankName: '', date: new Date().toISOString().split('T')[0] });
       setCashPaid('');
+      setShowNewCustomerForm(false);
       showToast(state.editingSaleId ? 'Bill updated successfully!' : 'Bill generated successfully!', 'success');
     } catch (err) {
       showToast('Error generating bill: ' + err.message, 'error');
@@ -232,6 +272,51 @@ export default function Billing() {
                   </button>
                 )}
               </div>
+
+              {/* Customer Selection */}
+              <div style={{ padding: '10px 15px', borderBottom: 'showNewCustomerForm ? "none" : "1px solid var(--border)"' }}>
+                <select 
+                  className="form-input" 
+                  value={selectedCustomerId} 
+                  onChange={e => {
+                    if (e.target.value === 'NEW') {
+                      setShowNewCustomerForm(true);
+                      setSelectedCustomerId('');
+                    } else {
+                      setShowNewCustomerForm(false);
+                      setSelectedCustomerId(e.target.value);
+                    }
+                  }}
+                >
+                  <option value="">-- Select Customer (Optional) --</option>
+                  <option value="NEW" style={{ color: 'var(--primary)', fontWeight: 'bold' }}>+ Add New Customer</option>
+                  {state.customers?.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} - {c.phone} {c.type === 'old' ? '(Old)' : ''}</option>
+                  ))}
+                </select>
+                {selectedCustomer && selectedCustomer.udhaarBalance > 0 && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--red)', marginTop: '4px' }}>
+                    Pending Dues: ₹{selectedCustomer.udhaarBalance.toFixed(2)}
+                  </div>
+                )}
+              </div>
+
+              {showNewCustomerForm && (
+                <div style={{ padding: '0 15px 10px 15px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '8px' }}>
+                  <input className="form-input" placeholder="Name" value={newCustomer.name} onChange={e => setNewCustomer({...newCustomer, name: e.target.value})} style={{ flex: 1, padding: '6px', fontSize: '0.8rem' }} />
+                  <input className="form-input" placeholder="Phone" value={newCustomer.phone} onChange={e => setNewCustomer({...newCustomer, phone: e.target.value})} style={{ flex: 1, padding: '6px', fontSize: '0.8rem' }} />
+                  <button className="btn btn-primary btn-sm" style={{ padding: '0 10px' }} onClick={async () => {
+                    if (!newCustomer.name) return showToast('Name is required', 'error');
+                    const id = Date.now().toString();
+                    await addCustomer({ id, name: newCustomer.name, phone: newCustomer.phone, type: 'new', udhaarBalance: 0 });
+                    setSelectedCustomerId(id);
+                    setShowNewCustomerForm(false);
+                    setNewCustomer({ name: '', phone: '' });
+                    showToast('Customer added successfully', 'success');
+                  }}>Save</button>
+                  <button className="btn btn-ghost btn-sm" style={{ padding: '0 8px' }} onClick={() => setShowNewCustomerForm(false)}>✕</button>
+                </div>
+              )}
 
               <div className="cart-items">
                 {state.cart.length === 0 && (
@@ -324,17 +409,65 @@ export default function Billing() {
 
               <div style={{ marginTop: 14 }}>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text3)', marginBottom: 6 }}>{tx.payment}</div>
-                <div className="payment-modes">
-                  {['Cash', 'UPI', 'Card'].map(m => (
+                <div className="payment-modes" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {['Cash', 'UPI', 'Card', 'RTGS', 'NEFT', 'Cheque', 'Debt'].map(m => (
                     <button
                       key={m}
                       className={`payment-mode-btn ${paymentMode === m ? 'active' : ''}`}
                       onClick={() => setPaymentMode(m)}
+                      style={{ flex: '1 1 calc(33% - 6px)', padding: '6px', fontSize: '0.8rem' }}
                     >
-                      {m === 'Cash' ? '💵' : m === 'UPI' ? '📱' : '💳'} {m}
+                      {m === 'Cash' ? '💵' : m === 'UPI' ? '📱' : m === 'Card' ? '💳' : m === 'Debt' ? '📒' : '🏦'} {m}
                     </button>
                   ))}
                 </div>
+
+                {['RTGS', 'NEFT'].includes(paymentMode) && (
+                  <div className="cash-input-row" style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+                    <input
+                      className="form-input"
+                      type="text"
+                      placeholder="UTR Number"
+                      value={bankDetails.utr}
+                      onChange={e => setBankDetails({ ...bankDetails, utr: e.target.value })}
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      className="form-input"
+                      type="date"
+                      value={bankDetails.date}
+                      onChange={e => setBankDetails({ ...bankDetails, date: e.target.value })}
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                )}
+                {paymentMode === 'Cheque' && (
+                  <div className="cash-input-row" style={{ marginTop: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <input
+                      className="form-input"
+                      type="text"
+                      placeholder="Cheque No."
+                      value={bankDetails.chequeNo}
+                      onChange={e => setBankDetails({ ...bankDetails, chequeNo: e.target.value })}
+                      style={{ flex: '1 1 45%' }}
+                    />
+                    <input
+                      className="form-input"
+                      type="text"
+                      placeholder="Bank Name"
+                      value={bankDetails.bankName}
+                      onChange={e => setBankDetails({ ...bankDetails, bankName: e.target.value })}
+                      style={{ flex: '1 1 45%' }}
+                    />
+                    <input
+                      className="form-input"
+                      type="date"
+                      value={bankDetails.date}
+                      onChange={e => setBankDetails({ ...bankDetails, date: e.target.value })}
+                      style={{ flex: '1 1 100%' }}
+                    />
+                  </div>
+                )}
 
                 {paymentMode === 'Cash' && (
                   <div className="cash-input-row">
@@ -368,6 +501,22 @@ export default function Billing() {
       </div>
 
       {receipt && <Receipt sale={receipt} onClose={() => setReceipt(null)} />}
+
+      {/* Offer Popup for Old Customers */}
+      {showOfferPopup && selectedCustomer && (
+        <div className="modal-overlay" onClick={() => setShowOfferPopup(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '350px', textAlign: 'center' }}>
+            <div style={{ fontSize: '40px', marginBottom: '10px' }}>🎁</div>
+            <h3 style={{ color: 'var(--primary)', marginBottom: '10px' }}>Special Offers Available!</h3>
+            <p style={{ fontSize: '0.9rem', marginBottom: '20px' }}>
+              <strong>{selectedCustomer.name}</strong> is a loyal old customer.
+              <br/><br/>
+              Apply Bulk 10% discount or let them know about our "Buy 2 Get 1" running offers on cosmetics!
+            </p>
+            <button className="btn btn-primary btn-block" onClick={() => setShowOfferPopup(false)}>Got it</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

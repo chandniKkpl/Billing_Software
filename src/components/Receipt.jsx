@@ -4,7 +4,7 @@ import { showToast } from './Toast';
 
 export default function Receipt({ sale: initialSale, onClose, setPage }) {
   const ref = useRef();
-  const { updateSale, deleteSale, dispatch } = useApp();
+  const { updateSale, deleteSale, dispatch, state } = useApp();
   const [sale, setSale] = useState(initialSale);
   const [isEditing, setIsEditing] = useState(false);
   const [editedItems, setEditedItems] = useState(initialSale?.items || []);
@@ -212,6 +212,16 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
           </div>
           <div style={{ fontSize: '12px' }}>Time: {new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
           <div style={{ fontSize: '12px' }}>Mode: {sale.paymentMode}</div>
+          {sale.bankInfo && <div style={{ fontSize: '12px' }}>Ref/Bank: {sale.bankInfo}</div>}
+          
+          {sale.customerId && (() => {
+            const customer = state.customers?.find(c => c.id === sale.customerId);
+            return customer ? (
+              <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                Customer: <strong>{customer.name}</strong> ({customer.phone})
+              </div>
+            ) : null;
+          })()}
           
           <div className="receipt-divider"></div>
 
@@ -223,7 +233,7 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
                 <th className="right" style={{ width: '13%' }}>MRP</th>
                 <th className="right" style={{ width: '14%' }}>RATE</th>
                 <th className="center" style={{ width: '10%' }}>QTY</th>
-                <th className="right" style={{ width: '14%' }}>DISC%</th>
+                <th className="right" style={{ width: '14%' }}>SAVE</th>
                 <th className="right" style={{ width: '11%' }}>AMT</th>
               </tr>
             </thead>
@@ -261,7 +271,7 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
                     </td>
                     <td className="center">{item.qty}</td>
                     <td className="right" style={{ color: displayDiscPct > 0 ? 'green' : 'inherit', fontWeight: displayDiscPct > 0 ? 'bold' : 'normal' }}>
-                      {displayDiscPct > 0 ? `${displayDiscPct.toFixed(1)}%` : '—'}
+                      {displayMrp > rate ? `₹${(displayMrp - rate).toFixed(2)}` : '—'}
                     </td>
                     <td className="right"><strong>₹{amt.toFixed(2)}</strong></td>
                   </tr>

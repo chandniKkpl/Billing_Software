@@ -8,6 +8,14 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+billing_app/node_modules/
+billing_app/.expo/
+billing_app/android/.gradle/
+billing_app/android/build/
+billing_app/android/app/build/
+billing_app/ios/Pods/
+.next/
+out/
 dist
 dist-ssr
 *.local

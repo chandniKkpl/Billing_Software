@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { useT } from '../i18n/translations';
-import { TrendingUp, Package, AlertTriangle, IndianRupee, Search, Calendar } from 'lucide-react';
+import { TrendingUp, Package, AlertTriangle, IndianRupee, Search, Calendar, Clock } from 'lucide-react';
 import Receipt from '../components/Receipt';
 
 function fmt(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
@@ -26,6 +26,17 @@ export default function Dashboard({ setPage }) {
     const matchDate = !dateFilter || new Date(s.date).toISOString().startsWith(dateFilter);
     return matchSearch && matchDate;
   });
+
+  const allAccounts = [
+    ...(state.customers || []).map(c => ({ ...c, type: 'Customer', balance: c.udhaarBalance || 0 })),
+    ...(state.vendors || []).map(v => ({ ...v, type: 'Vendor' })),
+    ...(state.accounts || [])
+  ];
+
+  const upcomingDues = allAccounts
+    .filter(a => a.dueDate && a.balance > 0)
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+    .slice(0, 10);
 
   return (
     <div>
@@ -135,6 +146,40 @@ export default function Dashboard({ setPage }) {
                     </span>
                   </li>
                 ))}
+              </ul>
+            )}
+          </div>
+          
+          {/* Upcoming Dues & Reminders */}
+          <div className="card">
+            <h3 style={{ marginBottom: 16, fontSize: '0.95rem', fontWeight: 700, color: 'var(--red)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Clock size={16} /> Reminders & Dues
+            </h3>
+            {upcomingDues.length === 0 ? (
+              <p style={{ color: 'var(--green)', fontSize: '0.85rem', textAlign: 'center', padding: '30px 0' }}>✅ No pending dues or reminders!</p>
+            ) : (
+              <ul className="low-stock-list">
+                {upcomingDues.map(acc => {
+                  const daysLeft = Math.ceil((new Date(acc.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+                  const isOverdue = daysLeft < 0;
+                  return (
+                    <li key={acc.id} className="low-stock-item" style={{ borderLeft: isOverdue ? '3px solid var(--red)' : '3px solid var(--orange)', paddingLeft: '8px' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{acc.name}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text3)' }}>
+                          <span className={`badge ${acc.type === 'Customer' ? 'badge-green' : 'badge-yellow'}`} style={{ padding: '0px 4px', fontSize: '0.65rem', marginRight: '4px' }}>{acc.type}</span>
+                          ₹{acc.balance.toFixed(2)}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: isOverdue ? 'var(--red)' : 'var(--orange)' }}>
+                          {isOverdue ? 'Overdue!' : `${daysLeft} days left`}
+                        </div>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>{new Date(acc.dueDate).toLocaleDateString()}</div>
+                      </div>
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>

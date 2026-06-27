@@ -1,28 +1,40 @@
-import { useState } from 'react';
+"use client";
+import { usePathname, useRouter } from 'next/navigation';
 import { useApp } from '../store/AppContext';
 import { useT } from '../i18n/translations';
 import {
   LayoutDashboard, ShoppingCart, Package, FileSpreadsheet,
-  Globe, X, BarChart2
+  Globe, X, BarChart2, Users, BookOpen
 } from 'lucide-react';
 
-export default function Sidebar({ page, setPage }) {
+export default function Sidebar() {
+  const pathname = usePathname();
+  const router = useRouter();
   const { state, dispatch } = useApp();
   const tx = useT(state.lang);
 
-  const lowStockCount = state.products.filter(p => (p.stock || 0) <= 5 && (p.stock || 0) > 0).length;
-  const oos = state.products.filter(p => (p.stock || 0) === 0).length;
+  const lowStockCount = state.products?.filter(p => (p.stock || 0) <= 5 && (p.stock || 0) > 0).length || 0;
+  const oos = state.products?.filter(p => (p.stock || 0) === 0).length || 0;
+
+  const dueVendors = state.vendors?.filter(v => {
+    if (!v.dueDate) return false;
+    const due = new Date(v.dueDate);
+    const diffDays = Math.ceil((due - new Date()) / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 && diffDays <= 10;
+  }).length || 0;
 
   const navItems = [
-    { id: 'dashboard', label: tx.dashboard, icon: LayoutDashboard },
-    { id: 'billing', label: tx.billing, icon: ShoppingCart },
-    { id: 'reports', label: tx.reports || 'Reports', icon: BarChart2 },
-    { id: 'inventory', label: tx.inventory, icon: Package },
-    { id: 'import', label: tx.import, icon: FileSpreadsheet },
+    { id: '/', label: tx.dashboard, icon: LayoutDashboard },
+    { id: '/billing', label: tx.billing, icon: ShoppingCart },
+    { id: '/reports', label: tx.reports || 'Reports', icon: BarChart2 },
+    { id: '/customers', label: 'Customers', icon: Users },
+    { id: '/ledger', label: 'Ledger (Khata)', icon: BookOpen },
+    { id: '/inventory', label: tx.inventory, icon: Package },
+    { id: '/import', label: tx.import, icon: FileSpreadsheet },
   ];
 
   const handleNavClick = (id) => {
-    setPage(id);
+    router.push(id);
   };
 
   return (
@@ -37,14 +49,19 @@ export default function Sidebar({ page, setPage }) {
           {navItems.map(({ id, label, icon: Icon }) => (
             <div
               key={id}
-              className={`nav-item ${page === id ? 'active' : ''}`}
+              className={`nav-item ${pathname === id ? 'active' : ''}`}
               onClick={() => handleNavClick(id)}
             >
               <Icon size={18} />
               <span>{label}</span>
-              {id === 'inventory' && (lowStockCount + oos) > 0 && (
+              {id === '/inventory' && (lowStockCount + oos) > 0 && (
                 <span className="badge badge-yellow" style={{ marginLeft: 'auto', fontSize: '0.65rem' }}>
                   {lowStockCount + oos}
+                </span>
+              )}
+              {id === '/ledger' && dueVendors > 0 && (
+                <span className="badge badge-red" style={{ marginLeft: 'auto', fontSize: '0.65rem', backgroundColor: 'var(--red)', color: '#fff' }}>
+                  {dueVendors} Due
                 </span>
               )}
             </div>
