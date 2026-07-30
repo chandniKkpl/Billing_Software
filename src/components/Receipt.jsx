@@ -207,18 +207,40 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
           
           {/* Bill Info */}
           <div className="receipt-row" style={{ fontSize: '12px' }}>
-            <span><strong>Bill: #{sale.id.slice(-6).toUpperCase()}</strong></span>
+            <span><strong>Bill: #{sale.billNo ? String(sale.billNo).padStart(4, '0') : sale.id.slice(-6).toUpperCase()}</strong></span>
             <span>{new Date(sale.date).toLocaleDateString()}</span>
           </div>
           <div style={{ fontSize: '12px' }}>Time: {new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
           <div style={{ fontSize: '12px' }}>Mode: {sale.paymentMode}</div>
           {sale.bankInfo && <div style={{ fontSize: '12px' }}>Ref/Bank: {sale.bankInfo}</div>}
           
-          {sale.customerId && (() => {
-            const customer = state.customers?.find(c => c.id === sale.customerId);
+          {(() => {
+            const customer = (sale.customerId ? state.customers?.find(c => String(c.id) === String(sale.customerId)) : null)
+              || (sale.customerName ? { name: sale.customerName, phone: sale.customerPhone, pan: sale.customerPan, gst: sale.customerGst } : null);
             return customer ? (
               <div style={{ fontSize: '12px', marginTop: '4px' }}>
-                Customer: <strong>{customer.name}</strong> ({customer.phone})
+                Customer: <strong>{customer.name}</strong> {customer.phone ? `(${customer.phone})` : ''}
+                {(customer.pan || customer.gst) && (
+                  <div>
+                    {customer.pan && <span>PAN: {customer.pan} </span>}
+                    {customer.gst && <span>GSTIN: {customer.gst}</span>}
+                  </div>
+                )}
+              </div>
+            ) : null;
+          })()}
+
+          {sale.vendorId && (() => {
+            const vendor = state.vendors?.find(v => v.id === sale.vendorId);
+            return vendor ? (
+              <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                Vendor: <strong>{vendor.name}</strong> ({vendor.phone})
+                {(vendor.pan || vendor.gst) && (
+                  <div>
+                    {vendor.pan && <span>PAN: {vendor.pan} </span>}
+                    {vendor.gst && <span>GSTIN: {vendor.gst}</span>}
+                  </div>
+                )}
               </div>
             ) : null;
           })()}
@@ -287,6 +309,9 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
             <div className="receipt-row" style={{ fontSize: '12px' }}><span>Subtotal:</span><span>₹{currentSubtotal.toFixed(2)}</span></div>
             <div className="receipt-row" style={{ fontSize: '12px' }}><span>GST:</span><span>₹{currentGst.toFixed(2)}</span></div>
             {currentDiscount > 0 && <div className="receipt-row" style={{ fontSize: '12px', color: 'green' }}><span>Discount Saved:</span><span>-₹{currentDiscount.toFixed(2)}</span></div>}
+            {(sale.freight || 0) > 0 && <div className="receipt-row" style={{ fontSize: '12px' }}><span>Freight/Shipping:</span><span>+₹{sale.freight.toFixed(2)}</span></div>}
+            {(sale.labor || 0) > 0 && <div className="receipt-row" style={{ fontSize: '12px' }}><span>Labor Charges:</span><span>+₹{sale.labor.toFixed(2)}</span></div>}
+            {sale.roundOff ? <div className="receipt-row" style={{ fontSize: '12px' }}><span>Round Off:</span><span>{sale.roundOff > 0 ? '+' : ''}₹{sale.roundOff.toFixed(2)}</span></div> : null}
           </div>
           
           <div className="receipt-divider" style={{ borderStyle: 'solid' }}></div>
@@ -294,6 +319,18 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
             <span>GRAND TOTAL:</span>
             <span>₹{currentGrandTotal.toFixed(2)}</span>
           </div>
+          {['Debt', 'Credit'].includes(sale.paymentMode) && sale.cashPaid !== undefined && (
+            <>
+              <div className="receipt-row" style={{ fontSize: '13px', marginTop: '4px' }}>
+                <span>Amount Paid:</span>
+                <span>₹{Number(sale.cashPaid).toFixed(2)}</span>
+              </div>
+              <div className="receipt-row" style={{ fontSize: '13px', fontWeight: 'bold' }}>
+                <span>Remaining Debt:</span>
+                <span>₹{Math.max(0, currentGrandTotal - Number(sale.cashPaid)).toFixed(2)}</span>
+              </div>
+            </>
+          )}
           <div className="receipt-divider" style={{ borderStyle: 'solid' }}></div>
 
           {/* Savings message */}

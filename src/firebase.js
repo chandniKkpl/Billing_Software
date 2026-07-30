@@ -12,9 +12,12 @@ const firebaseConfig = {
   measurementId: "G-N6QT2E9FXF"
 };
 
+import { getAI, VertexAIBackend } from "firebase/ai";
+
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+export const ai = getAI(app, { backend: new VertexAIBackend() });
 
 // Enable offline persistence
 if (typeof window !== 'undefined') {

@@ -13,6 +13,7 @@ const nextConfig = {
   output: 'export',
   trailingSlash: true,
   turbopack: {},
+  allowedDevOrigins: ['10.69.194.170'],
 };
 
 export default withPWA(nextConfig);

@@ -9,13 +9,13 @@ import { PackageSearch, Plus, Search, X, Edit2, Trash2, Camera as CameraIcon } f
 import { Camera, useCameraDevice, useCodeScanner, useCameraPermission } from 'react-native-vision-camera';
 
 const EMPTY_FORM = {
-  name: '', brand: '', barcode: '',
+  name: '', brand: '', barcode: '', itemType: 'Goods',
   sellingPrice: '', mrp: '', purchasePrice: '',
-  stock: '', gst: '',
+  stock: '', gst: '', weight: '', unit: 'pcs', godown: 'Main',
 };
 
 export default function InventoryScreen() {
-  const { state, addProduct, updateProduct, deleteProduct } = useApp();
+  const { state, addProduct, updateProduct, deleteProduct, t } = useApp();
   const [search, setSearch] = useState('');
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -110,6 +110,7 @@ export default function InventoryScreen() {
     setFormData({
       name: product.name || '',
       brand: product.brand || '',
+      itemType: product.itemType || 'Goods',
       barcode: product.barcode || '',
       sellingPrice: product.sellingPrice?.toString() || '',
       mrp: product.mrp?.toString() || '',
@@ -132,6 +133,8 @@ export default function InventoryScreen() {
       purchasePrice: parseFloat(formData.purchasePrice) || 0,
       stock: parseInt(formData.stock) || 0,
       gst: parseFloat(formData.gst) || 0,
+      weight: parseFloat(formData.weight) || 0,
+      unit: formData.unit || 'pcs'
     };
     if (editingProduct) {
       await updateProduct({ ...payload, id: editingProduct.id });
@@ -157,7 +160,10 @@ export default function InventoryScreen() {
       <View style={styles.productCard}>
         <View style={styles.productInfo}>
           <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
-          {item.brand ? <Text style={styles.productBrand}>{item.brand}</Text> : null}
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            {item.brand ? <Text style={styles.productBrand}>{item.brand}</Text> : null}
+            {item.weight ? <Text style={styles.productBrand}>{item.weight} {item.unit || 'pcs'}</Text> : null}
+          </View>
           <Text style={styles.productBarcode}>{item.barcode}</Text>
           <View style={styles.priceRow}>
             <Text style={styles.sellPrice}>₹{item.sellingPrice}</Text>
@@ -178,6 +184,16 @@ export default function InventoryScreen() {
               {item.stock || 0} in stock
             </Text>
           </View>
+          {item.warehouseStock && (
+            <View style={{ marginTop: 6, marginLeft: 2 }}>
+              {Object.keys(item.warehouseStock).map(whId => {
+                const qty = item.warehouseStock[whId];
+                if (qty <= 0) return null;
+                const whName = state.warehouses?.find(w => w.id === whId)?.name || (whId === 'main' ? 'Main Store' : whId);
+                return <Text key={whId} style={{ fontSize: 11, color: '#64748B' }}>{whName}: {qty}</Text>;
+              })}
+            </View>
+          )}
           {item.gst ? <Text style={styles.gstText}>GST {item.gst}%</Text> : null}
           <View style={styles.actionRow}>
             <TouchableOpacity onPress={() => openEditModal(item)} style={styles.actionBtn}>
@@ -196,7 +212,7 @@ export default function InventoryScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Inventory</Text>
+          <Text style={styles.title}>{t('Inventory')}</Text>
           <Text style={styles.subtitle}>{state.products.length} products</Text>
         </View>
         <View style={styles.headerBtns}>
@@ -205,7 +221,7 @@ export default function InventoryScreen() {
           </TouchableOpacity>
           <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
             <Plus size={20} color="#FFFFFF" />
-            <Text style={styles.addButtonText}>Add</Text>
+            <Text style={styles.addButtonText}>{t('Add')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -214,7 +230,7 @@ export default function InventoryScreen() {
         <Search size={20} color="#94A3B8" />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by name, brand, barcode..."
+          placeholder={t('Search by name, brand, barcode...')}
           placeholderTextColor="#94A3B8"
           value={search}
           onChangeText={setSearch}
@@ -240,7 +256,7 @@ export default function InventoryScreen() {
             <Text style={styles.emptyText}>{search ? 'No products found' : 'Inventory is empty'}</Text>
             <TouchableOpacity style={styles.emptyScanBtn} onPress={openCamera}>
               <CameraIcon size={18} color="#2563EB" />
-              <Text style={styles.emptyScanText}>Scan Barcode to Add</Text>
+              <Text style={styles.emptyScanText}>{t('Scan Barcode to Add')}</Text>
             </TouchableOpacity>
           </View>
         }
@@ -264,16 +280,16 @@ export default function InventoryScreen() {
               <Animated.View style={[sc.target, { transform: [{ scale: pulseAnim }] }]}>
                 <View style={[sc.corner, sc.tl]} /><View style={[sc.corner, sc.tr]} />
                 <View style={[sc.corner, sc.bl]} /><View style={[sc.corner, sc.br]} />
-                <Text style={sc.scanHint}>Align barcode inside the box</Text>
+                <Text style={sc.scanHint}>{t('Align barcode inside the box')}</Text>
               </Animated.View>
               <View style={sc.sideMask} />
             </View>
             <View style={sc.bottomMask}>
-              <Text style={sc.scanLabel}>📷  Scan product barcode</Text>
-              <Text style={sc.scanSub}>Existing → Edit  •  New → Add Product</Text>
+              <Text style={sc.scanLabel}>{t('📷  Scan product barcode')}</Text>
+              <Text style={sc.scanSub}>{t('Existing → Edit  •  New → Add Product')}</Text>
               <TouchableOpacity style={sc.closeBtn} onPress={() => setIsScannerOpen(false)}>
                 <X size={22} color="#FFF" />
-                <Text style={sc.closeBtnText}>Cancel</Text>
+                <Text style={sc.closeBtnText}>{t('Cancel')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -299,45 +315,64 @@ export default function InventoryScreen() {
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               {/* Barcode */}
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Barcode *</Text>
+                <Text style={styles.label}>{t('Barcode *')}</Text>
                 <TextInput
                   style={styles.input}
                   value={formData.barcode}
                   onChangeText={v => set('barcode', v)}
-                  placeholder="Enter or scan barcode"
+                  placeholder={t('Enter or scan barcode')}
                   placeholderTextColor="#CBD5E1"
                 />
               </View>
 
               {/* Name */}
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Product Name *</Text>
+                <Text style={styles.label}>{t('Product Name *')}</Text>
                 <TextInput
                   style={styles.input}
                   value={formData.name}
                   onChangeText={v => set('name', v)}
-                  placeholder="e.g. Colgate Toothpaste 200g"
+                  placeholder={t('e.g. Colgate Toothpaste 200g')}
                   placeholderTextColor="#CBD5E1"
                 />
+              </View>
+
+              <Text style={styles.inputLabel}>{t('Item Type')}</Text>
+              <View style={{ flexDirection: 'row', marginBottom: 15 }}>
+                <TouchableOpacity 
+                  style={[styles.typeBtn, formData.itemType === 'Goods' && styles.typeBtnActive]} 
+                  onPress={() => set('itemType', 'Goods')}
+                >
+                  <Text style={[styles.typeBtnText, formData.itemType === 'Goods' && { color: '#2563EB' }]}>{t('📦 Goods')}</Text>
+                </TouchableOpacity>
+                <View style={{ width: 10 }} />
+                <TouchableOpacity 
+                  style={[styles.typeBtn, formData.itemType === 'Service' && styles.typeBtnActive]} 
+                  onPress={() => set('itemType', 'Service')}
+                >
+                  <Text style={[styles.typeBtnText, formData.itemType === 'Service' && { color: '#2563EB' }]}>{t('🔧 Service')}</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Brand */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Brand</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.brand}
-                  onChangeText={v => set('brand', v)}
-                  placeholder="e.g. Colgate"
-                  placeholderTextColor="#CBD5E1"
-                />
-              </View>
+              {formData.itemType === 'Goods' && (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>{t('Brand')}</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.brand}
+                    onChangeText={v => set('brand', v)}
+                    placeholder={t('e.g. Colgate')}
+                    placeholderTextColor="#CBD5E1"
+                  />
+                </View>
+              )}
 
               {/* MRP + Purchase Price */}
-              <Text style={styles.sectionLabel}>Pricing</Text>
+              <Text style={styles.sectionLabel}>{t('Pricing')}</Text>
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>MRP (₹)</Text>
+                  <Text style={styles.label}>{t('MRP (₹)')}</Text>
                   <TextInput
                     style={styles.input}
                     value={formData.mrp}
@@ -348,7 +383,7 @@ export default function InventoryScreen() {
                   />
                 </View>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Purchase Price (₹)</Text>
+                  <Text style={styles.label}>{t('Purchase Price (₹)')}</Text>
                   <TextInput
                     style={styles.input}
                     value={formData.purchasePrice}
@@ -363,7 +398,7 @@ export default function InventoryScreen() {
               {/* Selling Price + Stock */}
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Selling Price (₹) *</Text>
+                  <Text style={styles.label}>{t('Selling Price (₹) *')}</Text>
                   <TextInput
                     style={styles.input}
                     value={formData.sellingPrice}
@@ -373,22 +408,65 @@ export default function InventoryScreen() {
                     placeholderTextColor="#CBD5E1"
                   />
                 </View>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Stock (qty)</Text>
+                {formData.itemType === 'Goods' && (
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={styles.label}>{t('Stock (qty)')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.stock}
+                      onChangeText={v => set('stock', v)}
+                      keyboardType="numeric"
+                      placeholder="0"
+                      placeholderTextColor="#CBD5E1"
+                    />
+                  </View>
+                )}
+              </View>
+
+              {/* Weight & Unit */}
+              {formData.itemType === 'Goods' && (
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={styles.label}>{t('Weight')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.weight?.toString()}
+                      onChangeText={v => set('weight', v)}
+                      keyboardType="numeric"
+                      placeholder="0"
+                      placeholderTextColor="#CBD5E1"
+                    />
+                  </View>
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={styles.label}>{t('Unit (kg, pcs)')}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.unit}
+                      onChangeText={v => set('unit', v)}
+                      placeholder={t('pcs')}
+                      placeholderTextColor="#CBD5E1"
+                    />
+                  </View>
+                </View>
+              )}
+
+              {/* Godown */}
+              {formData.itemType === 'Goods' && (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>{t('Warehouse / Godown')}</Text>
                   <TextInput
                     style={styles.input}
-                    value={formData.stock}
-                    onChangeText={v => set('stock', v)}
-                    keyboardType="numeric"
-                    placeholder="0"
+                    value={formData.godown}
+                    onChangeText={v => set('godown', v)}
+                    placeholder={t('Main')}
                     placeholderTextColor="#CBD5E1"
                   />
                 </View>
-              </View>
+              )}
 
               {/* GST */}
               <View style={[styles.inputGroup, { width: '48%' }]}>
-                <Text style={styles.label}>GST %</Text>
+                <Text style={styles.label}>{t('GST %')}</Text>
                 <TextInput
                   style={styles.input}
                   value={formData.gst}
@@ -404,7 +482,7 @@ export default function InventoryScreen() {
                 <View style={styles.previewBox}>
                   {formData.purchasePrice ? (
                     <View style={styles.previewRow}>
-                      <Text style={styles.previewLabel}>Estimated Margin</Text>
+                      <Text style={styles.previewLabel}>{t('Estimated Margin')}</Text>
                       <Text style={styles.previewValue}>
                         ₹{(parseFloat(formData.sellingPrice) - parseFloat(formData.purchasePrice)).toFixed(2)}
                         {'  '}
@@ -419,7 +497,7 @@ export default function InventoryScreen() {
                         <Text style={styles.previewValue}>+ ₹{((parseFloat(formData.sellingPrice) * parseFloat(formData.gst)) / 100).toFixed(2)}</Text>
                       </View>
                       <View style={[styles.previewRow, { borderTopWidth: 1, borderTopColor: '#BBF7D0', paddingTop: 8, marginTop: 4 }]}>
-                        <Text style={styles.previewTotalLabel}>Final Price (inc. GST)</Text>
+                        <Text style={styles.previewTotalLabel}>{t('Final Price (inc. GST)')}</Text>
                         <Text style={styles.previewTotalValue}>₹{(parseFloat(formData.sellingPrice) + (parseFloat(formData.sellingPrice) * parseFloat(formData.gst)) / 100).toFixed(2)}</Text>
                       </View>
                     </>

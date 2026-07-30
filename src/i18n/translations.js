@@ -24,6 +24,9 @@ export const t = {
     stockHistory: 'Stock History', bulkUpdate: 'Bulk Update',
     noProducts: 'No products found', noSales: 'No sales yet',
     language: 'Language', settings: 'Settings',
+    purchaseEntry: 'Purchase Entry', customers: 'Customers & Debt',
+    enquiries: 'Enquiries', ledger: 'Ledger (Khata)',
+    warehouses: 'Warehouses', assets: 'Assets Master'
   },
   hi: {
     billing: 'बिलिंग', inventory: 'इन्वेंटरी', import: 'Excel आयात',
@@ -50,6 +53,9 @@ export const t = {
     stockHistory: 'स्टॉक इतिहास', bulkUpdate: 'बल्क अपडेट',
     noProducts: 'कोई उत्पाद नहीं', noSales: 'अभी तक कोई बिक्री नहीं',
     language: 'भाषा', settings: 'सेटिंग्स',
+    purchaseEntry: 'खरीद (Purchase)', customers: 'ग्राहक (Customers)',
+    enquiries: 'पूछताछ (Enquiries)', ledger: 'खाता (Ledger)',
+    warehouses: 'गोदाम (Warehouses)', assets: 'संपत्ति (Assets)'
   },
 };
 

@@ -4,7 +4,7 @@ import { useApp } from '../store/AppContext';
 import { useT } from '../i18n/translations';
 import {
   LayoutDashboard, ShoppingCart, Package, FileSpreadsheet,
-  Globe, X, BarChart2, Users, BookOpen
+  Globe, X, BarChart2, Users, BookOpen, MessageCircle, MapPin
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -13,8 +13,8 @@ export default function Sidebar() {
   const { state, dispatch } = useApp();
   const tx = useT(state.lang);
 
-  const lowStockCount = state.products?.filter(p => (p.stock || 0) <= 5 && (p.stock || 0) > 0).length || 0;
-  const oos = state.products?.filter(p => (p.stock || 0) === 0).length || 0;
+  const lowStockCount = state.products?.filter(p => p.itemType !== 'Service' && (p.stock || 0) <= 5 && (p.stock || 0) > 0).length || 0;
+  const oos = state.products?.filter(p => p.itemType !== 'Service' && (p.stock || 0) === 0).length || 0;
 
   const dueVendors = state.vendors?.filter(v => {
     if (!v.dueDate) return false;
@@ -26,11 +26,16 @@ export default function Sidebar() {
   const navItems = [
     { id: '/', label: tx.dashboard, icon: LayoutDashboard },
     { id: '/billing', label: tx.billing, icon: ShoppingCart },
+    { id: '/purchase', label: tx.purchaseEntry || 'Purchase Entry', icon: ShoppingCart },
     { id: '/reports', label: tx.reports || 'Reports', icon: BarChart2 },
-    { id: '/customers', label: 'Customers', icon: Users },
-    { id: '/ledger', label: 'Ledger (Khata)', icon: BookOpen },
+    { id: '/customers', label: tx.customers || 'Customers', icon: Users },
+    { id: '/enquiries', label: tx.enquiries || 'Enquiries', icon: MessageCircle },
+    { id: '/ledger', label: tx.ledger || 'Ledger (Khata)', icon: BookOpen },
     { id: '/inventory', label: tx.inventory, icon: Package },
+    { id: '/warehouses', label: tx.warehouses || 'Warehouses', icon: MapPin },
+    { id: '/assets', label: tx.assets || 'Assets', icon: BookOpen },
     { id: '/import', label: tx.import, icon: FileSpreadsheet },
+    { id: '/settings', label: tx.settings || 'Settings', icon: Globe },
   ];
 
   const handleNavClick = (id) => {

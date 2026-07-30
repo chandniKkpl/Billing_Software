@@ -26,8 +26,8 @@ function decryptData(key) {
 
 export function AppProvider({ children }) {
   const [state, setState] = useState({
-    products: [], sales: [], customers: [], vendors: [], ledgerTransactions: [], accounts: [],
-    cart: [], editingSaleId: null, lang: 'en', loading: true
+    products: [], sales: [], purchases: [], customers: [], vendors: [], ledgerTransactions: [], accounts: [], assets: [],
+    cart: [], editingSaleId: null, editingPurchaseId: null, lang: 'en', loading: true
   });
 
   useEffect(() => {
@@ -35,7 +35,7 @@ export function AppProvider({ children }) {
       setState(prev => ({ ...prev, lang: localStorage.getItem('cs_lang') || 'en' }));
     }
 
-    const collections = ['products', 'sales', 'customers', 'vendors', 'accounts', 'ledgerTransactions'];
+    const collections = ['products', 'sales', 'purchases', 'customers', 'vendors', 'accounts', 'ledgerTransactions', 'assets', 'enquiries', 'warehouses'];
     const unsubs = collections.map(coll => {
       return onSnapshot(collection(db, coll), snap => {
         const data = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
@@ -85,6 +85,49 @@ export function AppProvider({ children }) {
     };
   }, []);
 
+  // Auto WhatsApp Reminders
+  useEffect(() => {
+    if (state.loading || state.customers.length === 0) return;
+    
+    const today = new Date().toISOString().split('T')[0];
+    const lastGlobalCheck = localStorage.getItem('cs_last_reminder_check');
+    if (lastGlobalCheck === today) return; // Already checked today on this device
+    
+    state.customers.forEach(async (c) => {
+      if (c.dueDate && c.dueDate <= today && (c.udhaarBalance > 0) && c.lastReminderSentAt !== today) {
+        try {
+          const msg = `Hello ${c.name}, this is a gentle reminder that your pending dues are ₹${c.udhaarBalance.toFixed(2)}. Please settle the amount by ${c.dueDate}. Thank you! - Cosmo Store`;
+          
+          const apiUrl = import.meta.env.VITE_WHATSAPP_API_URL;
+          const apiKey = import.meta.env.VITE_WHATSAPP_API_KEY;
+          
+          if (apiUrl && apiKey && c.phone) {
+            const res = await fetch(apiUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+              },
+              body: JSON.stringify({
+                to: c.phone,
+                type: 'text',
+                text: msg
+              })
+            });
+            
+            if (res.ok) {
+              await setDoc(doc(db, 'customers', String(c.id)), { lastReminderSentAt: today }, { merge: true });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to send auto-reminder to", c.name, err);
+        }
+      }
+    });
+
+    localStorage.setItem('cs_last_reminder_check', today);
+  }, [state.loading, state.customers.length]);
+
   const dispatch = (action) => {
     switch (action.type) {
       case 'ADD_TO_CART': {
@@ -103,6 +146,9 @@ export function AppProvider({ children }) {
       case 'SET_EDITING_SALE':
         setState(prev => ({ ...prev, editingSaleId: action.payload }));
         break;
+      case 'SET_EDITING_PURCHASE':
+        setState(prev => ({ ...prev, editingPurchaseId: action.payload }));
+        break;
       case 'UPDATE_CART_ITEM':
         setState(prev => ({ ...prev, cart: prev.cart.map(c => c.id === action.payload.id ? { ...c, ...action.payload } : c) }));
         break;
@@ -110,7 +156,7 @@ export function AppProvider({ children }) {
         setState(prev => ({ ...prev, cart: prev.cart.filter(c => c.id !== action.payload) }));
         break;
       case 'CLEAR_CART':
-        setState(prev => ({ ...prev, cart: [], editingSaleId: null }));
+        setState(prev => ({ ...prev, cart: [], editingSaleId: null, editingPurchaseId: null }));
         break;
       case 'SET_LANG':
         localStorage.setItem('cs_lang', action.payload);
@@ -212,36 +258,153 @@ export function AppProvider({ children }) {
     
     if (existingIndex >= 0) {
       const oldSale = state.sales[existingIndex];
+      const oldWhId = oldSale.warehouseId || 'main';
       oldSale.items.forEach(item => {
         const product = state.products.find(p => p.id === item.id);
-        if (product) {
-           const newStock = (product.stock || 0) + item.qty;
-           batch.set(doc(db, 'products', String(product.id)), { stock: newStock }, { merge: true });
+        if (product && product.itemType !== 'Service') {
+           let whStock = { ...(product.warehouseStock || {}) };
+           if (Object.keys(whStock).length === 0 && (product.stock || 0) > 0) whStock['main'] = product.stock;
+           whStock[oldWhId] = (whStock[oldWhId] || 0) + item.qty;
+           const newStock = Object.values(whStock).reduce((sum, val) => sum + val, 0);
+           batch.set(doc(db, 'products', String(product.id)), { stock: newStock, warehouseStock: whStock }, { merge: true });
         }
       });
     }
 
+    const whId = sale.warehouseId || 'main';
     sale.items.forEach(item => {
       const product = state.products.find(p => p.id === item.id);
-      if (product) {
-        const baseStock = (existingIndex >= 0 && state.sales[existingIndex].items.find(i=>i.id===item.id)) 
-                          ? (product.stock || 0) + state.sales[existingIndex].items.find(i=>i.id===item.id).qty 
-                          : (product.stock || 0);
-        const newStock = Math.max(0, baseStock - item.qty);
-        batch.set(doc(db, 'products', String(product.id)), { stock: newStock }, { merge: true });
+      if (product && product.itemType !== 'Service') {
+        let whStock = { ...(product.warehouseStock || {}) };
+        if (Object.keys(whStock).length === 0 && (product.stock || 0) > 0) whStock['main'] = product.stock;
+        
+        // If updating the exact same warehouse, the revert above already added the old qty back
+        // If different warehouse, old was added back to oldWhId, now deduct from new whId
+        whStock[whId] = Math.max(0, (whStock[whId] || 0) - item.qty);
+        const newStock = Object.values(whStock).reduce((sum, val) => sum + val, 0);
+        batch.set(doc(db, 'products', String(product.id)), { stock: newStock, warehouseStock: whStock }, { merge: true });
       }
     });
 
-    if (sale.paymentMode === 'Debt' && sale.customerId && !existingIndex >= 0) {
+    if (sale.paymentMode === 'Debt' && sale.customerId && existingIndex === -1) {
       const customer = state.customers.find(c => c.id === sale.customerId);
       if (customer) {
-        const newBalance = (customer.udhaarBalance || 0) + sale.grandTotal;
+        const amountPaidNow = Number(sale.cashPaid) || 0;
+        const newBalance = (customer.udhaarBalance || 0) + (sale.grandTotal - amountPaidNow);
         batch.set(doc(db, 'customers', String(customer.id)), { udhaarBalance: newBalance }, { merge: true });
+
+        if (amountPaidNow > 0) {
+          const txnId = `rect-${sale.id}`;
+          batch.set(doc(db, 'ledgerTransactions', txnId), {
+            id: txnId,
+            date: sale.date || new Date().toISOString(),
+            customerId: customer.id,
+            type: 'Receive',
+            amount: amountPaidNow,
+            paymentMode: 'Cash',
+            notes: 'Advance received against sale',
+            saleId: sale.id
+          });
+        }
       }
     }
 
-    batch.set(doc(db, 'sales', String(sale.id)), sale);
+    const cleanSale = JSON.parse(JSON.stringify(sale, (k, v) => (v === undefined ? null : v)));
+    batch.set(doc(db, 'sales', String(sale.id)), cleanSale);
     
+    await batch.commit();
+    dispatch({ type: 'CLEAR_CART' });
+  };
+
+  const completePurchase = async (purchase) => {
+    const batch = writeBatch(db);
+    
+    const existingIndex = state.purchases.findIndex(p => p.id === purchase.id);
+    if (existingIndex >= 0) {
+      const oldPurchase = state.purchases[existingIndex];
+      const oldWhId = oldPurchase.warehouseId || 'main';
+      
+      // Revert old stock (decrement)
+      oldPurchase.items.forEach(item => {
+        const product = state.products.find(p => p.id === item.id);
+        if (product && product.itemType !== 'Service') {
+          let whStock = { ...(product.warehouseStock || {}) };
+          if (Object.keys(whStock).length === 0 && (product.stock || 0) > 0) whStock['main'] = product.stock;
+          whStock[oldWhId] = Math.max(0, (whStock[oldWhId] || 0) - item.qty);
+          const newStock = Object.values(whStock).reduce((sum, val) => sum + val, 0);
+          batch.set(doc(db, 'products', String(product.id)), { stock: newStock, warehouseStock: whStock }, { merge: true });
+        }
+      });
+      
+      // Revert old vendor credit
+      if (oldPurchase.paymentMode === 'Credit' && oldPurchase.vendorId) {
+        const vendor = state.vendors.find(v => v.id === oldPurchase.vendorId);
+        if (vendor) {
+          const newBalance = (vendor.balance || 0) - (oldPurchase.grandTotal - (Number(oldPurchase.cashPaid) || 0));
+          batch.set(doc(db, 'vendors', String(vendor.id)), { balance: newBalance }, { merge: true });
+        }
+      }
+    }
+
+    // Apply new stock (increment)
+    const whId = purchase.warehouseId || 'main';
+    purchase.items.forEach(item => {
+      const product = state.products.find(p => p.id === item.id);
+      if (product && product.itemType !== 'Service') {
+        let whStock = { ...(product.warehouseStock || {}) };
+        if (Object.keys(whStock).length === 0 && (product.stock || 0) > 0) whStock['main'] = product.stock;
+        whStock[whId] = (whStock[whId] || 0) + item.qty;
+        const newStock = Object.values(whStock).reduce((sum, val) => sum + val, 0);
+        batch.set(doc(db, 'products', String(product.id)), { stock: newStock, warehouseStock: whStock }, { merge: true });
+      }
+    });
+
+    // Net Vendor Balance Logic
+    if (purchase.paymentMode === 'Credit' && purchase.vendorId) {
+      const vendor = state.vendors.find(v => v.id === purchase.vendorId);
+      if (vendor) {
+        let newBalance = vendor.balance || 0;
+        const amountPaidNow = Number(purchase.cashPaid) || 0;
+        
+        if (existingIndex >= 0) {
+          const oldPurchase = state.purchases[existingIndex];
+          if (oldPurchase.paymentMode === 'Credit' && oldPurchase.vendorId === vendor.id) {
+            newBalance = newBalance - (oldPurchase.grandTotal - (Number(oldPurchase.cashPaid) || 0));
+          }
+        }
+        
+        newBalance = newBalance + (purchase.grandTotal - amountPaidNow);
+        batch.set(doc(db, 'vendors', String(vendor.id)), { balance: newBalance }, { merge: true });
+        
+        if (amountPaidNow > 0 && existingIndex === -1) {
+          const txnId = `pay-${purchase.id}`;
+          batch.set(doc(db, 'ledgerTransactions', txnId), {
+            id: txnId,
+            date: purchase.date || new Date().toISOString(),
+            vendorId: vendor.id,
+            type: 'Payment',
+            amount: amountPaidNow,
+            paymentMode: 'Cash',
+            notes: 'Advance given against purchase',
+            purchaseId: purchase.id
+          });
+        }
+      }
+    } else if (existingIndex >= 0) {
+      // If we changed FROM credit TO cash on the SAME vendor, the reversion already happened above,
+      // but we need to ensure the final write respects it.
+      const oldPurchase = state.purchases[existingIndex];
+      if (oldPurchase.paymentMode === 'Credit' && oldPurchase.vendorId) {
+        const vendor = state.vendors.find(v => v.id === oldPurchase.vendorId);
+        if (vendor) {
+          const newBalance = (vendor.balance || 0) - (oldPurchase.grandTotal - (Number(oldPurchase.cashPaid) || 0));
+          batch.set(doc(db, 'vendors', String(vendor.id)), { balance: newBalance }, { merge: true });
+        }
+      }
+    }
+
+    // Save purchase record
+    batch.set(doc(db, 'purchases', String(purchase.id)), purchase);
     await batch.commit();
     dispatch({ type: 'CLEAR_CART' });
   };
@@ -266,6 +429,26 @@ export function AppProvider({ children }) {
     await batch.commit();
   };
 
+  const updatePurchase = async (purchaseId, updatedData) => {
+    await setDoc(doc(db, 'purchases', String(purchaseId)), updatedData, { merge: true });
+  };
+
+  const deletePurchase = async (purchaseId) => {
+    const purchase = state.purchases.find(p => p.id === purchaseId);
+    if (!purchase) return;
+    
+    const batch = writeBatch(db);
+    purchase.items.forEach(item => {
+      const product = state.products.find(p => p.id === item.id);
+      if (product) {
+        batch.set(doc(db, 'products', String(product.id)), { stock: Math.max(0, (product.stock || 0) - item.qty) }, { merge: true });
+      }
+    });
+    
+    batch.delete(doc(db, 'purchases', String(purchaseId)));
+    await batch.commit();
+  };
+
   const setLang = (l) => dispatch({ type: 'SET_LANG', payload: l });
 
   const value = {
@@ -278,6 +461,9 @@ export function AppProvider({ children }) {
     completeSale,
     updateSale,
     deleteSale,
+    completePurchase,
+    updatePurchase,
+    deletePurchase,
     addCustomer,
     updateCustomer,
     deleteCustomer,

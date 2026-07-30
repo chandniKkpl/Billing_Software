@@ -5,131 +5,43 @@ import { Plus, Search, Edit2, Trash2, X } from 'lucide-react';
 import { showToast } from '../components/Toast';
 
 const CATEGORIES = ['Lips', 'Face', 'Eyes', 'Skincare', 'Nails', 'Hair', 'Fragrance', 'Other'];
-const EMPTY = { name: '', barcode: '', category: 'Skincare', brand: '', purchasedFrom: '', purchasePrice: '', sellingPrice: '', mrp: '', stock: '', gst: 18 };
+const EMPTY = { name: '', barcode: '', itemType: 'Goods', category: 'Hardware', brand: '', purchasedFrom: '', purchasePrice: '', sellingPrice: '', mrp: '', stock: '', gst: 18, godown: 'Main' };
 
-function ProductModal({ product, allProducts, onSave, onClose, tx }) {
-  const [form, setForm] = useState(product || EMPTY);
-  const barcodeRef = useRef();
-
-  useEffect(() => {
-    setTimeout(() => barcodeRef.current?.focus(), 100);
-  }, []);
-
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
-  const handleBarcodeScan = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault(); // Prevent form submit
-      const code = e.target.value.trim();
-      if (!code) return;
-      
-      const existing = allProducts.find(p => p.barcode === code);
-      if (existing && (!form.id || form.id !== existing.id)) {
-        setForm(existing);
-        showToast('Existing product found! Details loaded.', 'info');
-      }
-    }
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!form.name || !form.sellingPrice) { showToast('Name & selling price required', 'error'); return; }
-    onSave({ ...form, id: form.id || Date.now().toString(), sellingPrice: +form.sellingPrice, purchasePrice: +form.purchasePrice, mrp: +form.mrp, stock: +form.stock, gst: +form.gst });
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>{form.id ? tx.editProduct : tx.addProduct}</h3>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-        <form onSubmit={handleSubmit}>
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">{tx.barcode} (Scan now)</label>
-              <input 
-                ref={barcodeRef}
-                className="form-input" 
-                value={form.barcode} 
-                onChange={e => set('barcode', e.target.value)} 
-                onKeyDown={handleBarcodeScan}
-                placeholder="Scan or type barcode..."
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">{tx.name} *</label>
-              <input className="form-input" value={form.name} onChange={e => set('name', e.target.value)} required />
-            </div>
-          </div>
-          <div className="form-row">
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">{tx.brand}</label>
-              <input className="form-input" value={form.brand} onChange={e => set('brand', e.target.value)} />
-            </div>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">Purchased From (Supplier)</label>
-              <input className="form-input" value={form.purchasedFrom || ''} onChange={e => set('purchasedFrom', e.target.value)} />
-            </div>
-          </div>
-          <div className="form-row-3">
-            <div className="form-group">
-              <label className="form-label">{tx.mrp} (₹)</label>
-              <input className="form-input" type="number" step="any" value={form.mrp} onChange={e => set('mrp', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">{tx.sellingPrice} (₹) *</label>
-              <input className="form-input" type="number" step="any" value={form.sellingPrice} onChange={e => set('sellingPrice', e.target.value)} required />
-            </div>
-            <div className="form-group">
-              <label className="form-label">{tx.purchasePrice} (₹)</label>
-              <input className="form-input" type="number" step="any" value={form.purchasePrice} onChange={e => set('purchasePrice', e.target.value)} />
-            </div>
-          </div>
-          <div className="form-row">
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">{tx.stock} (qty)</label>
-              <input className="form-input" type="number" step="any" value={form.stock} onChange={e => set('stock', e.target.value)} style={{ background: 'rgba(5, 150, 105, 0.1)', fontWeight: 'bold' }} />
-            </div>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">GST (%)</label>
-              <select className="form-input" value={form.gst !== undefined ? form.gst : 18} onChange={e => set('gst', Number(e.target.value))}>
-                <option value={0}>0%</option>
-                <option value={5}>5%</option>
-                <option value={12}>12%</option>
-                <option value={18}>18%</option>
-                <option value={28}>28%</option>
-              </select>
-            </div>
-          </div>
-          <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>{tx.cancel}</button>
-            <button type="submit" className="btn btn-primary">{tx.save}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
+import ProductModal from '../components/modals/ProductModal';
 export default function Inventory() {
   const { state, addProduct, updateProduct, deleteProduct } = useApp();
   const tx = useT(state.lang);
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('All');
+  const [whFilter, setWhFilter] = useState('All');
   const [modal, setModal] = useState(null); // null | 'add' | product obj
 
   const categories = ['All', ...CATEGORIES];
+  const warehouses = state.warehouses || [];
 
   const filtered = state.products.filter(p => {
     const q = search.toLowerCase();
     const matchCat = catFilter === 'All' || p.category === catFilter;
     const matchQ = !q || p.name.toLowerCase().includes(q) || p.brand?.toLowerCase().includes(q) || p.barcode?.includes(q);
-    return matchCat && matchQ;
+    
+    let matchWh = true;
+    if (whFilter !== 'All') {
+      // For specific warehouse, only show if it has stock > 0
+      const whStock = p.warehouseStock?.[whFilter] || 0;
+      matchWh = whStock > 0;
+    }
+    
+    return matchCat && matchQ && matchWh;
   });
 
   const handleSave = async (product) => {
     try {
+      if (product.itemType !== 'Service' && product.stock !== undefined && product.stock !== '') {
+        const whId = product.godown || 'main';
+        product.warehouseStock = { [whId]: Number(product.stock) };
+        product.stock = Number(product.stock);
+      }
+
       if (product.id && state.products.find(p => p.id === product.id)) {
         await updateProduct(product);
       } else {
@@ -180,6 +92,11 @@ export default function Inventory() {
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
+            <select className="form-input" style={{ width: 180 }} value={whFilter} onChange={e => setWhFilter(e.target.value)}>
+              <option value="All">All Warehouses (Total)</option>
+              <option value="main">Main Store</option>
+              {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
             <span style={{ fontSize: '0.8rem', color: 'var(--text3)' }}>{filtered.length} products</span>
           </div>
 
@@ -195,13 +112,13 @@ export default function Inventory() {
                   <th>{tx.sellingPrice}</th>
                   <th>{tx.purchasePrice}</th>
                   <th>GST</th>
-                  <th>{tx.stock}</th>
+                  <th style={{ width: '220px' }}>{whFilter === 'All' ? 'Stock Breakdown' : 'Stock'}</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text3)', padding: '40px' }}>{tx.noProducts}</td></tr>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text3)', padding: '40px' }}>{tx.noProducts}</td></tr>
                 )}
                 {filtered.map(p => (
                   <tr key={p.id}>
@@ -213,7 +130,27 @@ export default function Inventory() {
                     <td style={{ fontWeight: 600, color: 'var(--primary)' }}>₹{p.sellingPrice}</td>
                     <td style={{ color: 'var(--text3)' }}>₹{p.purchasePrice || '—'}</td>
                     <td>{p.gst || 0}%</td>
-                    <td>{getStockBadge(p.stock || 0)}</td>
+                    <td>
+                      {p.itemType === 'Service' ? (
+                        <span className="badge badge-yellow">Service</span>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {whFilter === 'All' ? (
+                            <>
+                              <div style={{ fontWeight: 600 }}>Total: {getStockBadge(p.stock)}</div>
+                              {p.warehouseStock && Object.keys(p.warehouseStock).map(whId => {
+                                 const qty = p.warehouseStock[whId];
+                                 if (qty <= 0) return null;
+                                 const whName = warehouses.find(w => w.id === whId)?.name || (whId === 'main' ? 'Main Store' : whId);
+                                 return <div key={whId} style={{ fontSize: '0.75rem', color: 'var(--text3)' }}>{whName}: {qty}</div>
+                              })}
+                            </>
+                          ) : (
+                            <div style={{ fontWeight: 600 }}>{getStockBadge(p.warehouseStock?.[whFilter] || 0)}</div>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button className="btn btn-ghost btn-sm" onClick={() => setModal(p)}>
@@ -236,6 +173,7 @@ export default function Inventory() {
         <ProductModal
           product={modal === 'add' ? null : modal}
           allProducts={state.products}
+          warehouses={warehouses}
           onSave={handleSave}
           onClose={() => setModal(null)}
           tx={tx}

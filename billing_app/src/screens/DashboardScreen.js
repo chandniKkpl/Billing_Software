@@ -1,24 +1,44 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity, Modal, Alert } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity, Modal, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useApp } from '../store/AppContext';
-import { TrendingUp, Package, AlertTriangle, IndianRupee, X, CheckCircle2, Edit2, Trash2, Printer, Clock } from 'lucide-react-native';
+import { TrendingUp, Package, AlertTriangle, IndianRupee, X, CheckCircle2, Edit2, Trash2, Printer, Clock, Bell, MessageCircle, ArrowRight, Menu } from 'lucide-react-native';
 import RNPrint from 'react-native-print';
 import { useNavigation } from '@react-navigation/native';
+import { generateReceiptHTML } from '../utils/printUtils';
+import Receipt from '../components/Receipt';
 
 const fmt = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 const getToday = () => new Date().toDateString();
 
 export default function DashboardScreen() {
-  const { state, deleteSale, editBill } = useApp();
+  const { state, deleteSale, editBill, setDrawerOpen, t } = useApp();
   const navigation = useNavigation();
   const [selectedBill, setSelectedBill] = useState(null);
+  const [showNotifications, setShowNotifications] = useState(false);
 
-  const todaySales = state.sales.filter(s => new Date(s.date).toDateString() === getToday());
-  const todayRevenue = todaySales.reduce((a, s) => a + s.grandTotal, 0);
-  const totalRevenue = state.sales.reduce((a, s) => a + s.grandTotal, 0);
-  const lowStock = state.products.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 5);
-  const oos = state.products.filter(p => (p.stock || 0) === 0);
+  const { todaySales, todayRevenue, totalRevenue, lowStock, oos, upcomingDues } = useMemo(() => {
+    const todayStr = getToday();
+    const ts = state.sales.filter(s => new Date(s.date).toDateString() === todayStr);
+    const tr = ts.reduce((a, s) => a + s.grandTotal, 0);
+    const totR = state.sales.reduce((a, s) => a + s.grandTotal, 0);
+    
+    const ls = state.products.filter(p => p.itemType !== 'Service' && (p.stock || 0) > 0 && (p.stock || 0) <= 5);
+    const os = state.products.filter(p => p.itemType !== 'Service' && (p.stock || 0) === 0);
+    
+    const dues = state.customers.filter(c => (c.udhaarBalance || 0) > 0).map(c => ({
+      id: c.id, name: c.name, phone: c.phone, balance: c.udhaarBalance,
+      dueDate: c.dueDate ? new Date(c.dueDate) : null
+    })).sort((a, b) => {
+      if (a.dueDate && b.dueDate) return a.dueDate - b.dueDate;
+      if (a.dueDate) return -1;
+      if (b.dueDate) return 1;
+      return b.balance - a.balance;
+    }).slice(0, 5);
+
+    return { todaySales: ts, todayRevenue: tr, totalRevenue: totR, lowStock: ls, oos: os, upcomingDues: dues };
+  }, [state.sales, state.products, state.customers]);
 
   const allAccounts = [
     ...(state.customers || []).map(c => ({ ...c, type: 'Customer', balance: c.udhaarBalance || 0 })),
@@ -26,43 +46,40 @@ export default function DashboardScreen() {
     ...(state.accounts || [])
   ];
 
-  const upcomingDues = allAccounts
-    .filter(a => a.dueDate && a.balance > 0)
-    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
-    .slice(0, 5);
+  const notificationDues = allAccounts
+    .filter(a => {
+      if (!a.dueDate || a.balance <= 0) return false;
+      const daysLeft = Math.ceil((new Date(a.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+      return daysLeft <= 5;
+    })
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+  useEffect(() => {
+    const checkDailyAlert = async () => {
+      try {
+        const lastDate = await AsyncStorage.getItem('lastNotificationDate');
+        const todayStr = getToday();
+        if (lastDate !== todayStr && notificationDues.length > 0) {
+          Alert.alert(
+            "Upcoming Dues Alert", 
+            `You have ${notificationDues.length} accounts with dues approaching in 5 days or overdue!`,
+            [
+              { text: 'Later', style: 'cancel' },
+              { text: 'View Dues', onPress: () => setShowNotifications(true) }
+            ]
+          );
+          await AsyncStorage.setItem('lastNotificationDate', todayStr);
+        }
+      } catch(e) {}
+    };
+    if (notificationDues.length > 0) {
+      checkDailyAlert();
+    }
+  }, [notificationDues.length]);
 
   const printSelectedBill = async () => {
     if (!selectedBill) return;
-    const html = `<html><head><style>
-      body{font-family:Helvetica,Arial,sans-serif;padding:20px;color:#333}
-      h1{text-align:center;color:#000;margin-bottom:5px}
-      .sub{text-align:center;color:#666;font-size:14px;margin-bottom:30px;letter-spacing:2px;text-transform:uppercase}
-      .det{border-bottom:2px dashed #ccc;padding-bottom:20px;margin-bottom:20px}
-      .det p{margin:5px 0;font-size:14px}
-      table{width:100%;border-collapse:collapse;margin-bottom:20px}
-      th,td{text-align:left;padding:10px 0;border-bottom:1px solid #eee}
-      th{color:#666;font-size:12px;text-transform:uppercase}
-      .tot{width:100%;max-width:300px;float:right;margin-bottom:40px}
-      .tot p{display:flex;justify-content:space-between;margin:8px 0;font-size:14px}
-      .gt{font-size:20px!important;font-weight:bold;border-top:2px solid #000;padding-top:10px;margin-top:10px!important}
-      .foot{clear:both;text-align:center;margin-top:50px;font-size:12px;color:#888}
-    </style></head><body>
-      <h1>Cosmo Store</h1><div class="sub">Retail Invoice</div>
-      <div class="det">
-        <p><strong>Bill No:</strong> #${selectedBill.id.slice(-6).toUpperCase()}</p>
-        <p><strong>Date:</strong> ${new Date(selectedBill.date).toLocaleString('en-IN')}</p>
-        <p><strong>Payment:</strong> ${selectedBill.paymentMode}</p>
-      </div>
-      <table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Total</th></tr></thead>
-      <tbody>${selectedBill.items.map(i => `<tr><td>${i.name}<br><small style="color:#666">₹${i.sellingPrice}</small></td><td style="text-align:center">${i.qty}</td><td style="text-align:right">₹${(i.qty * i.sellingPrice).toFixed(2)}</td></tr>`).join('')}</tbody></table>
-      <div class="tot">
-        <p><span>Subtotal:</span><span>₹${selectedBill.subtotal.toFixed(2)}</span></p>
-        <p><span>GST:</span><span>₹${selectedBill.gst.toFixed(2)}</span></p>
-        ${selectedBill.discount > 0 ? `<p><span>Discount:</span><span>-₹${selectedBill.discount.toFixed(2)}</span></p>` : ''}
-        <p class="gt"><span>Grand Total:</span><span>₹${selectedBill.grandTotal.toFixed(2)}</span></p>
-      </div>
-      <div class="foot">Thank you for shopping with us!</div>
-    </body></html>`;
+    const html = generateReceiptHTML(selectedBill);
     try { await RNPrint.print({ html }); } catch (e) { Alert.alert('Print Error', e.message); }
   };
 
@@ -114,11 +131,36 @@ export default function DashboardScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Dashboard</Text>
-        <Text style={styles.dateText}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <TouchableOpacity onPress={() => setDrawerOpen(true)} style={styles.menuBtn}>
+            <Menu size={28} color="#0F172A" />
+          </TouchableOpacity>
+          <View>
+            <Text style={styles.title}>Dashboard</Text>
+            <Text style={styles.dateText}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
+          </View>
+        </View>
+        <TouchableOpacity style={styles.bellBtn} onPress={() => setShowNotifications(true)}>
+          <Bell size={24} color="#475569" />
+          {notificationDues.length > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{notificationDues.length}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 15 }}>
+          <TouchableOpacity 
+            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 }}
+            onPress={() => navigation.navigate('Enquiries')}
+          >
+            <MessageCircle size={18} color="#2563EB" style={{ marginRight: 6 }} />
+            <Text style={{ color: '#2563EB', fontWeight: '600' }}>Enquiries</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.statsGrid}>
           <View style={[styles.statCard, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1 }]}>
             <IndianRupee size={20} color="#2563EB" style={styles.statIcon} />
@@ -193,7 +235,19 @@ export default function DashboardScreen() {
                 const daysLeft = Math.ceil((new Date(item.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
                 const isOverdue = daysLeft < 0;
                 return (
-                  <View style={[styles.lowStockRow, { borderLeftWidth: 3, borderLeftColor: isOverdue ? '#DC2626' : '#F59E0B', paddingLeft: 10 }]}>
+                  <TouchableOpacity 
+                    style={[styles.lowStockRow, { borderLeftWidth: 3, borderLeftColor: isOverdue ? '#DC2626' : '#F59E0B', paddingLeft: 10, paddingVertical: 12, alignItems: 'center' }]}
+                    onPress={() => {
+                      if (item.phone) {
+                        const message = `Hello ${item.name}, this is a gentle reminder regarding your pending balance of Rs. ${item.balance.toFixed(2)}. Please arrange for payment by ${new Date(item.dueDate).toLocaleDateString()}. Thank you!\n\nRegards,\nCosmo Store`;
+                        Linking.openURL(`whatsapp://send?text=${encodeURIComponent(message)}&phone=91${item.phone}`).catch(() => {
+                          Alert.alert("Error", "WhatsApp not installed");
+                        });
+                      } else {
+                        Alert.alert("Error", "No phone number saved for this account.");
+                      }
+                    }}
+                  >
                     <View style={{ flex: 1 }}>
                       <Text style={styles.lowStockName}>{item.name}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -203,13 +257,16 @@ export default function DashboardScreen() {
                         <Text style={styles.lowStockCat}>₹{item.balance.toFixed(2)}</Text>
                       </View>
                     </View>
-                    <View style={{ alignItems: 'flex-end' }}>
+                    <View style={{ alignItems: 'flex-end', marginRight: 10 }}>
                        <Text style={{ fontSize: 12, fontWeight: 'bold', color: isOverdue ? '#DC2626' : '#D97706' }}>
                          {isOverdue ? 'Overdue!' : `${daysLeft} days left`}
                        </Text>
                        <Text style={{ fontSize: 10, color: '#64748B' }}>{new Date(item.dueDate).toLocaleDateString()}</Text>
                     </View>
-                  </View>
+                    <View style={{ backgroundColor: '#DCFCE7', padding: 8, borderRadius: 20 }}>
+                      <MessageCircle size={18} color="#16A34A" />
+                    </View>
+                  </TouchableOpacity>
                 );
               }}
             />
@@ -228,72 +285,77 @@ export default function DashboardScreen() {
               <X size={20} color="#64748B" />
             </TouchableOpacity>
           </View>
-
           {selectedBill && (
-            <ScrollView contentContainerStyle={styles.receiptScroll}>
-              <View style={styles.receiptCard}>
-                <View style={styles.receiptTop}>
-                  <CheckCircle2 size={48} color="#16A34A" style={{ marginBottom: 12 }} />
-                  <Text style={styles.storeName}>Cosmo Store</Text>
-                  <Text style={styles.receiptSubtitle}>Retail Invoice</Text>
-                </View>
-
-                <View style={styles.receiptDetails}>
-                  <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Bill No:</Text>
-                    <Text style={styles.receiptValue}>#{selectedBill.id.slice(-6).toUpperCase()}</Text>
-                  </View>
-                  <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Date:</Text>
-                    <Text style={styles.receiptValue}>{new Date(selectedBill.date).toLocaleString('en-IN')}</Text>
-                  </View>
-                  <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Payment:</Text>
-                    <Text style={styles.receiptValue}>{selectedBill.paymentMode}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.receiptItems}>
-                  {selectedBill.items.map(item => (
-                    <View key={item.id} style={styles.receiptItemRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.receiptItemName}>{item.name}</Text>
-                        <Text style={styles.receiptItemQty}>{item.qty} × ₹{item.sellingPrice}</Text>
-                      </View>
-                      <Text style={styles.receiptItemTotal}>₹{(item.qty * item.sellingPrice).toFixed(2)}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={styles.receiptTotals}>
-                  <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Subtotal</Text><Text style={styles.receiptValue}>₹{selectedBill.subtotal.toFixed(2)}</Text></View>
-                  <View style={styles.receiptRow}><Text style={styles.receiptLabel}>GST</Text><Text style={styles.receiptValue}>₹{selectedBill.gst.toFixed(2)}</Text></View>
-                  {selectedBill.discount > 0 && (
-                    <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Discount</Text><Text style={[styles.receiptValue, { color: '#16A34A' }]}>-₹{selectedBill.discount.toFixed(2)}</Text></View>
-                  )}
-                  <View style={[styles.receiptRow, styles.receiptGrandTotalRow]}>
-                    <Text style={styles.receiptGrandTotalLabel}>Grand Total</Text>
-                    <Text style={styles.receiptGrandTotalValue}>₹{selectedBill.grandTotal.toFixed(2)}</Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={styles.actionButtonsContainer}>
-                <TouchableOpacity style={styles.actionBtn} onPress={printSelectedBill}>
-                  <Printer size={20} color="#2563EB" />
-                  <Text style={[styles.actionBtnText, { color: '#2563EB' }]}>Print</Text>
+            <ScrollView contentContainerStyle={{ padding: 15, alignItems: 'center' }}>
+              <Receipt sale={selectedBill} />
+              
+              <View style={{ flexDirection: 'row', gap: 10, width: '100%', marginTop: 20 }}>
+                <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#EFF6FF', paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#BFDBFE' }} onPress={printSelectedBill}>
+                  <Printer size={18} color="#2563EB" />
+                  <Text style={{ color: '#2563EB', fontWeight: 'bold', fontSize: 14 }}>Print</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.actionBtn} onPress={handleEditBill}>
-                  <Edit2 size={20} color="#059669" />
-                  <Text style={[styles.actionBtnText, { color: '#059669' }]}>Edit Bill</Text>
+                <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#ECFDF5', paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#A7F3D0' }} onPress={handleEditBill}>
+                  <Edit2 size={18} color="#059669" />
+                  <Text style={{ color: '#059669', fontWeight: 'bold', fontSize: 14 }}>Edit Bill</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]} onPress={handleDeleteBill}>
-                  <Trash2 size={20} color="#DC2626" />
-                  <Text style={[styles.actionBtnText, { color: '#DC2626' }]}>Delete</Text>
+                <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#FEF2F2', paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FECACA' }} onPress={handleDeleteBill}>
+                  <Trash2 size={18} color="#DC2626" />
+                  <Text style={{ color: '#DC2626', fontWeight: 'bold', fontSize: 14 }}>Delete</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
           )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* Notifications Modal */}
+      <Modal visible={showNotifications} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowNotifications(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Notifications</Text>
+            <TouchableOpacity onPress={() => setShowNotifications(false)} style={styles.closeBtn}>
+              <X size={20} color="#64748B" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 20 }}>
+            {notificationDues.length === 0 ? (
+              <Text style={{ textAlign: 'center', color: '#64748B', marginTop: 50, fontSize: 16 }}>No upcoming dues within 5 days. 🎉</Text>
+            ) : (
+              notificationDues.map((item, index) => {
+                const daysLeft = Math.ceil((new Date(item.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+                const isOverdue = daysLeft < 0;
+                return (
+                  <View key={index} style={[styles.receiptCard, { marginBottom: 15, padding: 16 }]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0F172A' }}>{item.name}</Text>
+                        <Text style={{ fontSize: 13, color: '#64748B', marginTop: 2 }}>{item.type} • ₹{item.balance.toFixed(2)}</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end', marginLeft: 10 }}>
+                         <Text style={{ fontSize: 13, fontWeight: 'bold', color: isOverdue ? '#DC2626' : '#D97706' }}>
+                           {isOverdue ? 'Overdue!' : `In ${daysLeft} Days`}
+                         </Text>
+                         <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>Due: {new Date(item.dueDate).toLocaleDateString()}</Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity style={[styles.actionBtn, { marginTop: 15, backgroundColor: '#DCFCE7', borderColor: '#BBF7D0' }]} onPress={() => {
+                      if (item.phone) {
+                        const message = `Hello ${item.name}, this is a gentle reminder regarding your pending balance of Rs. ${item.balance.toFixed(2)}. Please arrange for payment by ${item.dueDate}. Thank you!\n\nRegards,\nCosmo Store`;
+                        Linking.openURL(`whatsapp://send?text=${encodeURIComponent(message)}&phone=91${item.phone}`).catch(() => {
+                          Alert.alert("Error", "WhatsApp not installed");
+                        });
+                      } else {
+                        Alert.alert("Error", "No phone number saved for this account.");
+                      }
+                    }}>
+                      <MessageCircle size={18} color="#16A34A" />
+                      <Text style={{ color: '#16A34A', fontWeight: 'bold' }}>Send WhatsApp Reminder</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -302,9 +364,12 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { padding: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 3, elevation: 2, zIndex: 10 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 3, elevation: 2, zIndex: 10 },
   title: { fontSize: 28, fontWeight: '900', color: '#0F172A' },
   dateText: { fontSize: 14, color: '#64748B', marginTop: 4, fontWeight: '500' },
+  bellBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 12, position: 'relative' },
+  badge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', minWidth: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#FFF' },
+  badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
   scrollContent: { padding: 16 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
   statCard: { width: '48%', padding: 16, borderRadius: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 5, elevation: 1 },
@@ -342,7 +407,7 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderColor: '#E2E8F0' },
   modalTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A' },
   closeBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 10 },
-  receiptScroll: { padding: 20, alignItems: 'center', paddingBottom: 40 },
+  receiptScroll: { padding: 20, paddingBottom: 40 },
   receiptCard: { width: '100%', backgroundColor: '#FFFFFF', padding: 24, borderRadius: 16, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 4 },
   receiptTop: { alignItems: 'center', marginBottom: 20, paddingBottom: 20, borderBottomWidth: 2, borderBottomColor: '#F1F5F9', borderStyle: 'dashed' },
   storeName: { fontSize: 24, fontWeight: '900', color: '#0F172A', marginBottom: 4 },

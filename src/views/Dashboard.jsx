@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { useT } from '../i18n/translations';
-import { TrendingUp, Package, AlertTriangle, IndianRupee, Search, Calendar, Clock } from 'lucide-react';
+import { TrendingUp, Package, AlertTriangle, IndianRupee, Search, Calendar, Clock, MessageCircle } from 'lucide-react';
 import Receipt from '../components/Receipt';
 
 function fmt(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
@@ -18,8 +18,8 @@ export default function Dashboard({ setPage }) {
   const todaySales = state.sales.filter(s => new Date(s.date).toDateString() === getToday());
   const todayRevenue = todaySales.reduce((a, s) => a + s.grandTotal, 0);
   const totalRevenue = state.sales.reduce((a, s) => a + s.grandTotal, 0);
-  const lowStock = state.products.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 5);
-  const oos = state.products.filter(p => (p.stock || 0) === 0);
+  const lowStock = state.products.filter(p => p.itemType !== 'Service' && (p.stock || 0) > 0 && (p.stock || 0) <= 5);
+  const oos = state.products.filter(p => p.itemType !== 'Service' && (p.stock || 0) === 0);
 
   const filteredSales = state.sales.filter(s => {
     const matchSearch = !search || s.id.toLowerCase().includes(search.toLowerCase());
@@ -116,7 +116,7 @@ export default function Dashboard({ setPage }) {
                   <tbody>
                     {filteredSales.map(s => (
                       <tr key={s.id} onClick={() => setSelectedSale(s)} style={{ cursor: 'pointer' }} className="hover-row">
-                        <td><span className="badge badge-purple">#{s.id.slice(-6).toUpperCase()}</span></td>
+                        <td><span className="badge badge-purple">#{s.billNo ? String(s.billNo).padStart(4, '0') : s.id.slice(-6).toUpperCase()}</span></td>
                         <td style={{ fontWeight: 600, color: 'var(--primary)' }}>{fmt(s.grandTotal)}</td>
                         <td><span className={`badge ${s.paymentMode === 'Cash' ? 'badge-green' : s.paymentMode === 'UPI' ? 'badge-purple' : 'badge-yellow'}`}>{s.paymentMode}</span></td>
                         <td style={{ color: 'var(--text3)', fontSize: '0.78rem' }}>{new Date(s.date).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
@@ -163,19 +163,34 @@ export default function Dashboard({ setPage }) {
                   const daysLeft = Math.ceil((new Date(acc.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
                   const isOverdue = daysLeft < 0;
                   return (
-                    <li key={acc.id} className="low-stock-item" style={{ borderLeft: isOverdue ? '3px solid var(--red)' : '3px solid var(--orange)', paddingLeft: '8px' }}>
-                      <div>
+                    <li 
+                      key={acc.id} 
+                      className="low-stock-item" 
+                      style={{ borderLeft: isOverdue ? '3px solid var(--red)' : '3px solid var(--orange)', paddingLeft: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      onClick={() => {
+                        if (acc.phone) {
+                          const message = `Hello ${acc.name}, this is a gentle reminder regarding your pending balance of Rs. ${acc.balance.toFixed(2)}. Please arrange for payment by ${new Date(acc.dueDate).toLocaleDateString()}. Thank you!\n\nRegards,\nCosmo Store`;
+                          window.open(`https://wa.me/91${acc.phone}?text=${encodeURIComponent(message)}`, '_blank');
+                        } else {
+                          alert('No phone number saved for this account.');
+                        }
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{acc.name}</div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text3)' }}>
                           <span className={`badge ${acc.type === 'Customer' ? 'badge-green' : 'badge-yellow'}`} style={{ padding: '0px 4px', fontSize: '0.65rem', marginRight: '4px' }}>{acc.type}</span>
                           ₹{acc.balance.toFixed(2)}
                         </div>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
+                      <div style={{ textAlign: 'right', marginRight: '10px' }}>
                         <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: isOverdue ? 'var(--red)' : 'var(--orange)' }}>
                           {isOverdue ? 'Overdue!' : `${daysLeft} days left`}
                         </div>
                         <div style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>{new Date(acc.dueDate).toLocaleDateString()}</div>
+                      </div>
+                      <div style={{ backgroundColor: '#DCFCE7', padding: '6px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <MessageCircle size={16} color="#16A34A" />
                       </div>
                     </li>
                   )

@@ -1,14 +1,22 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
+import { useT } from '../i18n/translations';
 import { showToast } from '../components/Toast';
-import { Plus, Edit2, Trash2, Clock, Paperclip, Eye, Briefcase, Users, CreditCard, Banknote, Landmark, TrendingUp, TrendingDown } from 'lucide-react';
+import { Plus, Edit2, Trash2, Paperclip, Briefcase, Users, Banknote, Landmark, TrendingUp, TrendingDown, BookOpen } from 'lucide-react';
 import { saveFile, getFile } from '../utils/storage';
 
+import AccountStatement from '../components/ledger/AccountStatement';
+import LedgerSummary from '../components/ledger/LedgerSummary';
+import SystemAccountStatement from '../components/ledger/SystemAccountStatement';
+import MasterDashboard from '../components/ledger/MasterDashboard';
+
 export default function Ledger() {
-  const { state, addVendor, updateVendor, deleteVendor, addCustomer, updateCustomer, deleteCustomer, addAccount, updateAccount, deleteAccount, addLedgerTransaction } = useApp();
+  const { state, addVendor, updateVendor, deleteVendor, addCustomer, updateCustomer, deleteCustomer, addAccount, updateAccount, deleteAccount, addLedgerTxn, updateLedgerTxn, deleteLedgerTxn } = useApp();
+  const tx = useT(state.lang);
   
-  const [activeTab, setActiveTab] = useState('Vendor');
+  const [activeTab, setActiveTab] = useState('Master');
   const accountTypes = [
+    { id: 'Master', icon: BookOpen },
     { id: 'Customer', icon: Users },
     { id: 'Vendor', icon: Briefcase },
     { id: 'Employee', icon: Users },
@@ -19,13 +27,14 @@ export default function Ledger() {
   ];
 
   const [showVendorModal, setShowVendorModal] = useState(false);
-  const [vendorForm, setVendorForm] = useState({ name: '', phone: '', interestRate: 0, interestType: 'Monthly', balance: 0, fromDate: new Date().toISOString().split('T')[0], dueDate: '' });
+  const [vendorForm, setVendorForm] = useState({ name: '', phone: '', pan: '', gst: '', interestRate: 0, interestType: 'Monthly', balance: 0, balanceType: 'Take', fromDate: new Date().toISOString().split('T')[0], dueDate: '', notes: '', monthlySalary: '', salaryDate: '' });
   const [editingVendor, setEditingVendor] = useState(null);
   
   const [showTxnModal, setShowTxnModal] = useState(false);
-  const [selectedVendor, setSelectedVendor] = useState(null);
-  const [txnForm, setTxnForm] = useState({ type: 'Add', amount: '', notes: '', file: null, fileName: '', paymentMode: 'Cash' });
+  const [txnForm, setTxnForm] = useState({ targetAccount: null, type: 'Add', amount: '', notes: '', file: null, fileName: '', paymentMode: 'Cash' });
   const [viewingFile, setViewingFile] = useState(null);
+  
+  const [searchQuery, setSearchQuery] = useState('');
 
   const getNormalizedList = () => {
     if (activeTab === 'Vendor') return state.vendors || [];
@@ -42,16 +51,22 @@ export default function Ledger() {
     return (state.accounts || []).filter(a => a.type === activeTab);
   };
   
-  const currentList = getNormalizedList();
-  const transactions = state.ledgerTransactions || [];
+  let currentList = getNormalizedList();
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase();
+    currentList = currentList.filter(a => a.name?.toLowerCase().includes(q) || a.phone?.includes(q));
+  }
 
   const handleSaveAccount = async (e) => {
     e.preventDefault();
     if (!vendorForm.name) return;
     try {
+      const rawBalance = Number(vendorForm.balance) || 0;
+      const computedBalance = vendorForm.balanceType === 'Give' ? -Math.abs(rawBalance) : Math.abs(rawBalance);
+      
       const payload = {
         ...vendorForm,
-        balance: Number(vendorForm.balance),
+        balance: computedBalance,
         interestRate: Number(vendorForm.interestRate)
       };
       if (editingVendor) {
@@ -73,7 +88,7 @@ export default function Ledger() {
 
   const handleSaveTxn = async (e) => {
     e.preventDefault();
-    if (!txnForm.amount || Number(txnForm.amount) <= 0) return;
+    if (!txnForm.amount || Number(txnForm.amount) <= 0 || !txnForm.targetAccount) return;
     try {
       const txnId = Date.now().toString();
       if (txnForm.file) {
@@ -81,9 +96,9 @@ export default function Ledger() {
       }
       await addLedgerTransaction({
         id: txnId,
-        vendorId: activeTab === 'Vendor' ? selectedVendor.id : undefined,
-        customerId: activeTab === 'Customer' ? selectedVendor.id : undefined,
-        accountId: !['Vendor', 'Customer'].includes(activeTab) ? selectedVendor.id : undefined,
+        vendorId: activeTab === 'Vendor' ? txnForm.targetAccount.id : null,
+        customerId: activeTab === 'Customer' ? txnForm.targetAccount.id : null,
+        accountId: !['Vendor', 'Customer'].includes(activeTab) ? txnForm.targetAccount.id : null,
         type: txnForm.type,
         amount: Number(txnForm.amount),
         notes: txnForm.notes,
@@ -93,10 +108,10 @@ export default function Ledger() {
       });
 
       if (activeTab === 'Customer') {
-         let newBal = selectedVendor.balance;
+         let newBal = txnForm.targetAccount.balance;
          if (['Borrow', 'Receive', 'Credit Note', 'Income', 'Add'].includes(txnForm.type)) newBal += Number(txnForm.amount);
          if (['Payment', 'Spend', 'Debit Note', 'Expense', 'Deduct'].includes(txnForm.type)) newBal -= Number(txnForm.amount);
-         await updateCustomer({ ...selectedVendor, udhaarBalance: newBal });
+         await updateCustomer({ ...txnForm.targetAccount, udhaarBalance: newBal });
       }
 
       showToast(`Transaction ${txnForm.type} recorded successfully`, 'success');
@@ -109,204 +124,99 @@ export default function Ledger() {
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    
-    // Check size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       showToast('File must be smaller than 5MB', 'error');
       return;
     }
-
     const reader = new FileReader();
-    reader.onload = (event) => {
-      setTxnForm({ ...txnForm, file: event.target.result, fileName: file.name });
-    };
+    reader.onload = (event) => setTxnForm({ ...txnForm, file: event.target.result, fileName: file.name });
     reader.readAsDataURL(file);
   };
 
   const openFile = async (txnId) => {
     const data = await getFile(txnId);
-    if (data) {
-      setViewingFile(data);
-    } else {
-      showToast('File not found', 'error');
-    }
-  };
-
-  const isDueSoon = (dateStr) => {
-    if (!dateStr) return false;
-    const due = new Date(dateStr);
-    const now = new Date();
-    const diffTime = due - now;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays >= 0 && diffDays <= 10;
-  };
-
-  const calculateInterest = (vendor) => {
-    if (!vendor.balance || vendor.balance <= 0 || !vendor.interestRate || !vendor.fromDate) return 0;
-    
-    const from = new Date(vendor.fromDate);
-    // Use dueDate for calculation if provided, otherwise use current date
-    let toDate = new Date();
-    if (vendor.dueDate) {
-      toDate = new Date(vendor.dueDate);
-      // If the due date is somehow before the from date, fallback to current date or just 0
-      if (toDate < from) {
-        toDate = new Date();
-      }
-    }
-    
-    // Calculate difference in days
-    const diffTime = toDate.getTime() - from.getTime();
-    const diffDays = Math.max(0, diffTime / (1000 * 60 * 60 * 24));
-    
-    let interest = 0;
-    if (vendor.interestType === 'Yearly') {
-      const years = diffDays / 365.25;
-      interest = vendor.balance * (vendor.interestRate / 100) * years;
-    } else {
-      // Monthly interest
-      const months = diffDays / 30.4166;
-      interest = vendor.balance * (vendor.interestRate / 100) * months;
-    }
-    
-    return interest;
+    if (data) setViewingFile(data);
+    else showToast('File not found', 'error');
   };
 
   return (
-    <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>📖 Universal Ledger (Khata)</h2>
-        <button className="btn btn-primary" onClick={() => { setEditingVendor(null); setVendorForm({ name: '', phone: '', interestRate: 0, interestType: 'Monthly', balance: 0, fromDate: new Date().toISOString().split('T')[0], dueDate: '' }); setShowVendorModal(true); }}>
-          <Plus size={16} /> Add {activeTab}
-        </button>
+    <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: '20px' }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
+        <h2 style={{ margin: 0 }}>📖 {tx.ledger || 'Universal Ledger (Khata)'}</h2>
+        {activeTab !== 'Master' && (
+          <button className="btn btn-primary" onClick={() => { setEditingVendor(null); setVendorForm({ name: '', phone: '', pan: '', gst: '', interestRate: 0, interestType: 'Monthly', balance: 0, balanceType: 'Take', fromDate: new Date().toISOString().split('T')[0], dueDate: '', notes: '', monthlySalary: '', salaryDate: '' }); setShowVendorModal(true); }}>
+            <Plus size={16} /> Create New {activeTab}
+          </button>
+        )}
       </div>
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', overflowX: 'auto', paddingBottom: '10px', borderBottom: '1px solid var(--border)' }}>
+      {/* Account Type Tabs */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '15px' }}>
         {accountTypes.map(tab => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.id}
               className={`btn ${activeTab === tab.id ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
-              onClick={() => setActiveTab(tab.id)}
+              style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
+              onClick={() => { setActiveTab(tab.id); setSearchQuery(''); }}
             >
-              <Icon size={14} />
+              <Icon size={16} />
               {tab.id}
             </button>
           )
         })}
       </div>
 
-      <div className="page-content" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-        {/* Account List */}
-        <div className="card">
-          <h3>{activeTab} Accounts</h3>
-          <div className="table-container" style={{ marginTop: '10px' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Balance</th>
-                  <th>Due Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentList.map(v => (
-                  <tr key={v.id}>
-                    <td>
-                      {v.name}
-                      {v.interestRate > 0 && <span style={{ fontSize: '0.7rem', display: 'block', color: 'var(--text3)' }}>{v.interestRate}% Int. ({v.interestType || 'Monthly'})</span>}
-                      {v.fromDate && <span style={{ fontSize: '0.7rem', display: 'block', color: 'var(--text3)' }}>From: {v.fromDate}</span>}
-                    </td>
-                    <td style={{ color: v.balance > 0 ? 'var(--red)' : 'var(--green)', fontWeight: 'bold' }}>
-                      ₹{v.balance?.toFixed(2) || '0.00'}
-                      {v.balance > 0 && (
-                        <>
-                          {v.interestRate > 0 && (
-                            <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--orange)' }}>
-                              + ₹{calculateInterest(v).toFixed(2)} Int.
-                            </span>
-                          )}
-                          <span style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text)', marginTop: '4px' }}>
-                            Total Payable: <strong>₹{(v.balance + calculateInterest(v)).toFixed(2)}</strong>
-                          </span>
-                        </>
-                      )}
-                    </td>
-                    <td>
-                      {v.dueDate && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isDueSoon(v.dueDate) ? 'var(--red)' : 'inherit' }}>
-                          <Clock size={12} />
-                          {v.dueDate}
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => { setEditingVendor(v); setVendorForm(v); setShowVendorModal(true); }}><Edit2 size={12}/></button>
-                        <button className="btn btn-primary btn-sm" onClick={() => { setSelectedVendor(v); setTxnForm({ type: 'Add', amount: '', notes: '', file: null, fileName: '', paymentMode: 'Cash' }); setShowTxnModal(true); }}>Add Txn</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => {
-                          if (activeTab === 'Vendor') deleteVendor(v.id);
-                          else if (activeTab === 'Customer') deleteCustomer(v.id);
-                          else deleteAccount(v.id);
-                        }}><Trash2 size={12}/></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {currentList.length === 0 && <tr><td colSpan="4" style={{ textAlign: 'center' }}>No {activeTab}s found</td></tr>}
-              </tbody>
-            </table>
-          </div>
+      {activeTab !== 'Master' && (
+        <div style={{ marginBottom: '25px', paddingBottom: '15px', borderBottom: '1px solid var(--border)' }}>
+          <input
+            type="text"
+            className="form-input"
+            placeholder={`Search ${activeTab} by name or phone...`}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{ width: '100%', maxWidth: '400px' }}
+          />
         </div>
+      )}
 
-        {/* Recent Transactions */}
-        <div className="card">
-          <h3>Recent Transactions</h3>
-          <div className="table-container" style={{ marginTop: '10px', maxHeight: '400px', overflowY: 'auto' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Supplier</th>
-                  <th>Type</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...transactions].sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 50).map(t => {
-                  let relatedEntity = state.vendors?.find(v => v.id === t.vendorId);
-                  if (!relatedEntity) relatedEntity = state.customers?.find(c => c.id === t.customerId);
-                  if (!relatedEntity) relatedEntity = state.accounts?.find(a => a.id === t.accountId);
-                  return (
-                    <tr key={t.id}>
-                      <td style={{ fontSize: '0.8rem' }}>{new Date(t.date).toLocaleDateString()}</td>
-                      <td>{relatedEntity?.name || 'Unknown'}</td>
-                      <td>
-                        <span className={`badge ${t.type === 'Payment' || t.type === 'Debit Note' ? 'badge-green' : 'badge-yellow'}`}>
-                          {t.type}
-                        </span>
-                      </td>
-                      <td style={{ fontWeight: 'bold' }}>
-                        ₹{t.amount.toFixed(2)}
-                        {t.hasFile && (
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '2px', marginLeft: '8px' }} onClick={() => openFile(t.id)} title="View Receipt">
-                            <Paperclip size={12} color="var(--primary)" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {/* Continuous Ledger Statements */}
+      <div>
+        {activeTab === 'Master' ? (
+          <MasterDashboard state={state} />
+        ) : currentList.length === 0 ? (
+          (['Cash', 'Bank', 'Income', 'Expenditure'].includes(activeTab)) ? (
+             <SystemAccountStatement type={activeTab} state={state} />
+          ) : (
+            <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text3)', border: '2px dashed var(--border)', borderRadius: '8px' }}>
+              <Briefcase size={48} style={{ opacity: 0.2, marginBottom: '15px' }} />
+              <h3>No {activeTab}s Found</h3>
+              <p>Click "Create New {activeTab}" to add an account.</p>
+            </div>
+          )
+        ) : (
+          currentList.map(account => (
+            <AccountStatement 
+              key={account.id}
+              account={account}
+              activeTab={activeTab}
+              state={state}
+              deleteVendor={deleteVendor}
+              deleteCustomer={deleteCustomer}
+              deleteAccount={deleteAccount}
+              setEditingVendor={setEditingVendor}
+              setVendorForm={setVendorForm}
+              setShowVendorModal={setShowVendorModal}
+              setTxnForm={setTxnForm}
+              setShowTxnModal={setShowTxnModal}
+              openFile={openFile}
+            />
+          ))
+        )}
       </div>
 
-      {/* Account Modal */}
+      {/* Account Modal (Create/Edit) */}
       {showVendorModal && (
         <div className="modal-overlay" onClick={() => setShowVendorModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
@@ -316,50 +226,127 @@ export default function Ledger() {
             </div>
             <form onSubmit={handleSaveAccount}>
               <div className="form-group">
-                <label className="form-label">Name</label>
-                <input className="form-input" type="text" value={vendorForm.name} onChange={e => setVendorForm({ ...vendorForm, name: e.target.value })} required />
+                <label className="form-label">
+                  {activeTab === 'Customer' ? 'Customer Name *' :
+                   activeTab === 'Vendor' ? 'Vendor / Supplier Name *' :
+                   activeTab === 'Employee' ? 'Employee Name *' :
+                   activeTab === 'Cash' ? 'Cash Account Name *' :
+                   activeTab === 'Bank' ? 'Bank Name *' :
+                   activeTab === 'Income' ? 'Income Source / Category *' :
+                   activeTab === 'Expenditure' ? 'Expense Category (e.g., Rent) *' : 'Name *'}
+                </label>
+                <input 
+                  className="form-input" 
+                  type="text" 
+                  value={vendorForm.name} 
+                  onChange={e => setVendorForm({ ...vendorForm, name: e.target.value })} 
+                  placeholder={
+                    activeTab === 'Customer' ? 'e.g., Rahul Kumar' :
+                    activeTab === 'Vendor' ? 'e.g., Sharma Distributors' :
+                    activeTab === 'Employee' ? 'e.g., Amit Singh' :
+                    activeTab === 'Cash' ? 'e.g., Main Cash, Petty Cash' :
+                    activeTab === 'Bank' ? 'e.g., HDFC Bank, SBI' :
+                    activeTab === 'Income' ? 'e.g., Commission, Interest' :
+                    activeTab === 'Expenditure' ? 'e.g., Rent, Electricity, Tea' : 'Enter Name'
+                  }
+                  required 
+                />
               </div>
-              <div className="form-group">
-                <label className="form-label">Phone</label>
-                <input className="form-input" type="text" value={vendorForm.phone} onChange={e => setVendorForm({ ...vendorForm, phone: e.target.value })} />
-              </div>
+              
+              {['Customer', 'Vendor', 'Employee'].includes(activeTab) && (
+                <div className="form-group">
+                  <label className="form-label">Phone</label>
+                  <input className="form-input" type="text" value={vendorForm.phone} onChange={e => setVendorForm({ ...vendorForm, phone: e.target.value })} />
+                </div>
+              )}
+
+              {['Customer', 'Vendor'].includes(activeTab) && (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">PAN No.</label>
+                    <input className="form-input" type="text" value={vendorForm.pan} onChange={e => setVendorForm({ ...vendorForm, pan: e.target.value })} />
+                  </div>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">GST No.</label>
+                    <input className="form-input" type="text" value={vendorForm.gst} onChange={e => setVendorForm({ ...vendorForm, gst: e.target.value })} />
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'Bank' && (
+                <div className="form-group">
+                  <label className="form-label">Account Number / Details</label>
+                  <input className="form-input" type="text" value={vendorForm.phone} onChange={e => setVendorForm({ ...vendorForm, phone: e.target.value })} placeholder="e.g. A/C 123456789" />
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: '10px' }}>
                 <div className="form-group" style={{ flex: 1 }}>
                   <label className="form-label">Initial Balance (₹)</label>
                   <input className="form-input" type="number" step="any" value={vendorForm.balance} onChange={e => setVendorForm({ ...vendorForm, balance: e.target.value })} disabled={!!editingVendor} />
                 </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">From Date</label>
-                  <input className="form-input" type="date" value={vendorForm.fromDate} onChange={e => setVendorForm({ ...vendorForm, fromDate: e.target.value })} />
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Interest Rate (%)</label>
-                  <input className="form-input" type="number" step="any" value={vendorForm.interestRate} onChange={e => setVendorForm({ ...vendorForm, interestRate: e.target.value })} />
-                </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Interest Type</label>
-                  <select className="form-input" value={vendorForm.interestType || 'Monthly'} onChange={e => setVendorForm({ ...vendorForm, interestType: e.target.value })}>
-                    <option value="Monthly">Monthly</option>
-                    <option value="Yearly">Yearly</option>
-                  </select>
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Return Due Date</label>
-                <input className="form-input" type="date" value={vendorForm.dueDate} onChange={e => setVendorForm({ ...vendorForm, dueDate: e.target.value })} />
+                {['Customer', 'Vendor', 'Employee'].includes(activeTab) && (
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">Balance Type</label>
+                    <select className="form-input" value={vendorForm.balanceType} onChange={e => setVendorForm({ ...vendorForm, balanceType: e.target.value })} disabled={!!editingVendor}>
+                      <option value="Take">Receivable (I will get)</option>
+                      <option value="Give">Payable (I will give)</option>
+                    </select>
+                  </div>
+                )}
               </div>
               
-              {(Number(vendorForm.balance) > 0) ? (
-                <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text)' }}>Interest Calculated: ₹{calculateInterest(vendorForm).toFixed(2)}</p>
-                  <p style={{ margin: '4px 0 0', fontWeight: 'bold', fontSize: '1.1rem', color: 'var(--red)' }}>
-                    Total Payable: ₹{(Number(vendorForm.balance) + calculateInterest(vendorForm)).toFixed(2)}
-                  </p>
-                </div>
-              ) : null}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {['Customer', 'Vendor', 'Employee'].includes(activeTab) && (
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">{activeTab === 'Employee' ? 'Joining Date' : 'From Date'}</label>
+                    <input className="form-input" type="date" value={vendorForm.fromDate} onChange={e => setVendorForm({ ...vendorForm, fromDate: e.target.value })} />
+                  </div>
+                )}
+              </div>
 
+              {activeTab === 'Employee' && (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">Monthly Salary (₹)</label>
+                    <input className="form-input" type="number" step="any" value={vendorForm.monthlySalary} onChange={e => setVendorForm({ ...vendorForm, monthlySalary: e.target.value })} />
+                  </div>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">Salary Date (e.g. 1st)</label>
+                    <input className="form-input" type="text" placeholder="e.g. 5th of every month" value={vendorForm.salaryDate} onChange={e => setVendorForm({ ...vendorForm, salaryDate: e.target.value })} />
+                  </div>
+                </div>
+              )}
+
+              {['Customer', 'Vendor'].includes(activeTab) && (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">Interest Rate (%)</label>
+                    <input className="form-input" type="number" step="any" value={vendorForm.interestRate} onChange={e => setVendorForm({ ...vendorForm, interestRate: e.target.value })} />
+                  </div>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">Interest Type</label>
+                    <select className="form-input" value={vendorForm.interestType || 'Monthly'} onChange={e => setVendorForm({ ...vendorForm, interestType: e.target.value })}>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Yearly">Yearly</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {['Customer', 'Vendor', 'Employee', 'Expenditure'].includes(activeTab) && (
+                <div className="form-group">
+                  <label className="form-label">Due Date (Reminder)</label>
+                  <input className="form-input" type="date" value={vendorForm.dueDate} onChange={e => setVendorForm({ ...vendorForm, dueDate: e.target.value })} />
+                </div>
+              )}
+
+              {['Customer', 'Vendor', 'Employee'].includes(activeTab) && (
+                <div className="form-group">
+                  <label className="form-label">Notes / Remarks</label>
+                  <textarea className="form-input" rows="2" value={vendorForm.notes} onChange={e => setVendorForm({ ...vendorForm, notes: e.target.value })} placeholder="Any extra information..." />
+                </div>
+              )}
               <div className="modal-footer">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowVendorModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">Save</button>
@@ -378,21 +365,49 @@ export default function Ledger() {
               <button className="modal-close" onClick={() => setShowTxnModal(false)}>✕</button>
             </div>
             <form onSubmit={handleSaveTxn}>
-              <p style={{ marginBottom: '10px' }}>{activeTab}: <strong>{selectedVendor?.name}</strong></p>
-              
+              <p style={{ marginBottom: '10px' }}>For: <strong>{txnForm.targetAccount?.name}</strong></p>
               <div className="form-group">
                 <label className="form-label">Transaction Type</label>
                 <select className="form-input" value={txnForm.type} onChange={e => setTxnForm({ ...txnForm, type: e.target.value })}>
-                  <option value="Borrow">Borrow (Udhar Liya)</option>
-                  <option value="Payment">Payment</option>
-                  <option value="Receive">Receive (Received Payment)</option>
-                  <option value="Credit Note">Credit Note</option>
-                  <option value="Debit Note">Debit Note</option>
+                  {['Customer', 'Vendor'].includes(activeTab) && (
+                    <>
+                      <option value="Borrow">Borrow (Udhar Liya)</option>
+                      <option value="Payment">Payment</option>
+                      <option value="Receive">Receive (Received Payment)</option>
+                      <option value="Credit Note">Credit Note</option>
+                      <option value="Debit Note">Debit Note</option>
+                    </>
+                  )}
+                  {activeTab === 'Employee' && (
+                    <>
+                      <option value="Add">Salary Due (Increase Payable)</option>
+                      <option value="Payment">Pay Salary / Wage</option>
+                      <option value="Borrow">Advance Given</option>
+                      <option value="Receive">Return Advance</option>
+                    </>
+                  )}
+                  {activeTab === 'Expenditure' && (
+                    <>
+                      <option value="Expense">Record Expense</option>
+                      <option value="Payment">Pay Expense</option>
+                    </>
+                  )}
+                  {activeTab === 'Income' && (
+                    <>
+                      <option value="Add">Record Income</option>
+                      <option value="Receive">Receive Income</option>
+                    </>
+                  )}
+                  {['Bank', 'Cash'].includes(activeTab) && (
+                    <>
+                      <option value="Add">Deposit / Add Money</option>
+                      <option value="Deduct">Withdraw / Deduct Money</option>
+                    </>
+                  )}
                   <option value="Add">Add (Increase Balance)</option>
                   <option value="Deduct">Deduct (Decrease Balance)</option>
                 </select>
               </div>
-
               <div className="form-group">
                 <label className="form-label">Payment Mode</label>
                 <select className="form-input" value={txnForm.paymentMode} onChange={e => setTxnForm({ ...txnForm, paymentMode: e.target.value })}>
@@ -402,23 +417,19 @@ export default function Ledger() {
                   <option value="Cheque">Cheque</option>
                 </select>
               </div>
-              
               <div className="form-group">
                 <label className="form-label">Amount (₹)</label>
                 <input className="form-input" type="number" step="any" value={txnForm.amount} onChange={e => setTxnForm({ ...txnForm, amount: e.target.value })} required />
               </div>
-              
               <div className="form-group">
                 <label className="form-label">Notes (Optional)</label>
                 <input className="form-input" type="text" value={txnForm.notes} onChange={e => setTxnForm({ ...txnForm, notes: e.target.value })} placeholder="E.g., Interest for Jan" />
               </div>
-              
               <div className="form-group">
                 <label className="form-label">Attach Bill/Receipt (Optional)</label>
                 <input className="form-input" type="file" accept="image/*,.pdf,.csv" onChange={handleFileUpload} />
                 {txnForm.fileName && <span style={{ fontSize: '0.8rem', color: 'var(--green)' }}>Attached: {txnForm.fileName}</span>}
               </div>
-
               <div className="modal-footer">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowTxnModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">Save Txn</button>
@@ -430,7 +441,7 @@ export default function Ledger() {
 
       {/* View File Modal */}
       {viewingFile && (
-        <div className="modal-overlay" onClick={() => setViewingFile(null)}>
+        <div className="modal-overlay" onClick={() => setViewingFile(null)} style={{ zIndex: 10000 }}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%', height: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div className="modal-header">
               <h3>View Document</h3>

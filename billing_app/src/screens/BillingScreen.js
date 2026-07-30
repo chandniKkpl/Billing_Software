@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  FlatList, Alert, Modal, ScrollView, Animated,
+  FlatList, Alert, Modal, ScrollView, Animated, KeyboardAvoidingView, Platform, Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApp } from '../store/AppContext';
@@ -11,13 +11,18 @@ import {
 } from 'lucide-react-native';
 import { Camera, useCameraDevice, useCodeScanner, useCameraPermission } from 'react-native-vision-camera';
 import RNPrint from 'react-native-print';
+import { generateReceiptHTML } from '../utils/printUtils';
+import Receipt from '../components/Receipt';
+import DatePickerModal from '../components/DatePickerModal';
+import { Calendar as CalendarIcon } from 'lucide-react-native';
 
 /* ─────────────────────────────────────────────────────────── */
 /*  New-product / edit-product inline form (used from billing)  */
 /* ─────────────────────────────────────────────────────────── */
 function ProductFormModal({ visible, onClose, onSave, initialBarcode, existingProduct }) {
-  const emptyForm = { name: '', brand: '', barcode: '', sellingPrice: '', mrp: '', purchasePrice: '', stock: '', gst: '' };
+  const emptyForm = { name: '', brand: '', barcode: '', sellingPrice: '', mrp: '', purchasePrice: '', stock: '', gst: '', hsnCode: '' };
   const [form, setForm] = useState(emptyForm);
+  const { t } = useApp();
 
   useEffect(() => {
     if (visible) {
@@ -31,6 +36,7 @@ function ProductFormModal({ visible, onClose, onSave, initialBarcode, existingPr
           purchasePrice: existingProduct.purchasePrice?.toString() || '',
           stock: existingProduct.stock?.toString() || '',
           gst: existingProduct.gst?.toString() || '',
+          hsnCode: existingProduct.hsnCode || '',
         });
       } else {
         setForm({ ...emptyForm, barcode: initialBarcode || '' });
@@ -67,44 +73,50 @@ function ProductFormModal({ visible, onClose, onSave, initialBarcode, existingPr
         <ScrollView style={pf.body} keyboardShouldPersistTaps="handled">
           {/* Barcode */}
           <View style={pf.group}>
-            <Text style={pf.label}>Barcode *</Text>
+            <Text style={pf.label}>{t('Barcode *')}</Text>
             <TextInput style={pf.input} value={form.barcode} onChangeText={v => set('barcode', v)} />
           </View>
           {/* Name */}
           <View style={pf.group}>
-            <Text style={pf.label}>Product Name *</Text>
+            <Text style={pf.label}>{t('Product Name *')}</Text>
             <TextInput style={pf.input} value={form.name} onChangeText={v => set('name', v)} />
           </View>
-          {/* Brand */}
-          <View style={pf.group}>
-            <Text style={pf.label}>Brand</Text>
-            <TextInput style={pf.input} value={form.brand} onChangeText={v => set('brand', v)} />
+          {/* Brand & HSN */}
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={[pf.group, { flex: 1 }]}>
+              <Text style={pf.label}>{t('Brand')}</Text>
+              <TextInput style={pf.input} value={form.brand} onChangeText={v => set('brand', v)} />
+            </View>
+            <View style={[pf.group, { flex: 1 }]}>
+              <Text style={pf.label}>{t('HSN Code')}</Text>
+              <TextInput style={pf.input} value={form.hsnCode} onChangeText={v => set('hsnCode', v)} />
+            </View>
           </View>
           {/* MRP + Purchase Price */}
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <View style={[pf.group, { flex: 1 }]}>
-              <Text style={pf.label}>MRP (₹)</Text>
+              <Text style={pf.label}>{t('MRP (₹)')}</Text>
               <TextInput style={pf.input} value={form.mrp} onChangeText={v => set('mrp', v)} keyboardType="numeric" />
             </View>
             <View style={[pf.group, { flex: 1 }]}>
-              <Text style={pf.label}>Purchase Price (₹)</Text>
+              <Text style={pf.label}>{t('Purchase Price (₹)')}</Text>
               <TextInput style={pf.input} value={form.purchasePrice} onChangeText={v => set('purchasePrice', v)} keyboardType="numeric" />
             </View>
           </View>
           {/* Selling Price + Stock */}
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <View style={[pf.group, { flex: 1 }]}>
-              <Text style={pf.label}>Selling Price (₹) *</Text>
+              <Text style={pf.label}>{t('Selling Price (₹) *')}</Text>
               <TextInput style={pf.input} value={form.sellingPrice} onChangeText={v => set('sellingPrice', v)} keyboardType="numeric" />
             </View>
             <View style={[pf.group, { flex: 1 }]}>
-              <Text style={pf.label}>Stock</Text>
+              <Text style={pf.label}>{t('Stock')}</Text>
               <TextInput style={pf.input} value={form.stock} onChangeText={v => set('stock', v)} keyboardType="numeric" />
             </View>
           </View>
           {/* GST */}
           <View style={[pf.group, { width: '48%' }]}>
-            <Text style={pf.label}>GST %</Text>
+            <Text style={pf.label}>{t('GST %')}</Text>
             <TextInput style={pf.input} value={form.gst} onChangeText={v => set('gst', v)} keyboardType="numeric" />
           </View>
 
@@ -112,7 +124,7 @@ function ProductFormModal({ visible, onClose, onSave, initialBarcode, existingPr
           {form.sellingPrice && form.gst ? (
             <View style={pf.previewBox}>
               <View style={pf.previewRow}>
-                <Text style={pf.previewLabel}>Base Selling Price</Text>
+                <Text style={pf.previewLabel}>{t('Base Selling Price')}</Text>
                 <Text style={pf.previewValue}>₹{parseFloat(form.sellingPrice).toFixed(2)}</Text>
               </View>
               <View style={pf.previewRow}>
@@ -120,7 +132,7 @@ function ProductFormModal({ visible, onClose, onSave, initialBarcode, existingPr
                 <Text style={pf.previewValue}>+ ₹{((parseFloat(form.sellingPrice) * parseFloat(form.gst)) / 100).toFixed(2)}</Text>
               </View>
               <View style={[pf.previewRow, { borderTopWidth: 1, borderTopColor: '#BBF7D0', paddingTop: 8, marginTop: 4 }]}>
-                <Text style={pf.previewTotalLabel}>Final Price (inc. GST)</Text>
+                <Text style={pf.previewTotalLabel}>{t('Final Price (inc. GST)')}</Text>
                 <Text style={pf.previewTotalValue}>₹{(parseFloat(form.sellingPrice) + (parseFloat(form.sellingPrice) * parseFloat(form.gst)) / 100).toFixed(2)}</Text>
               </View>
             </View>
@@ -128,7 +140,7 @@ function ProductFormModal({ visible, onClose, onSave, initialBarcode, existingPr
           <TouchableOpacity style={pf.saveBtn} onPress={handleSave}>
             <Text style={pf.saveBtnText}>{existingProduct ? 'Update Product' : 'Save & Add to Cart'}</Text>
           </TouchableOpacity>
-          <View style={{ height: 50 }} />
+          <View style={{ height: 150 }} />
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -157,22 +169,56 @@ const pf = StyleSheet.create({
 /*  Main BillingScreen                                          */
 /* ─────────────────────────────────────────────────────────── */
 export default function BillingScreen() {
-  const { state, dispatch, completeSale, addProduct, updateProduct, addCustomer } = useApp();
+  const { state, dispatch, completeSale, addProduct, updateProduct, addCustomer, t } = useApp();
   const [barcode, setBarcode] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
   const [billDiscount, setBillDiscount] = useState({ type: 'none', value: '0' });
   const [customerId, setCustomerId] = useState('');
   const [bankInfo, setBankInfo] = useState('');
+  const [bankDate, setBankDate] = useState('');
+  const [utrNumber, setUtrNumber] = useState('');
+  const [cashPaid, setCashPaid] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [walkinName, setWalkinName] = useState('');
+  const [walkinPan, setWalkinPan] = useState('');
+  const [walkinGst, setWalkinGst] = useState('');
+  const [freightCharges, setFreightCharges] = useState('');
+  const [laborCharges, setLaborCharges] = useState('');
+  const [roundOff, setRoundOff] = useState('');
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [customerForm, setCustomerForm] = useState({ name: '', phone: '' });
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [warehouseId, setWarehouseId] = useState('main');
+  const [showWarehouseModal, setShowWarehouseModal] = useState(false);
+
+  const warehouses = state.warehouses || [];
+  const displayWarehouses = warehouses.some(w => w.id === 'main') ? warehouses : [{id: 'main', name: 'Main Store'}, ...warehouses];
 
   // Camera state
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [receiptSale, setReceiptSale] = useState(null);
 
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [datePickerTarget, setDatePickerTarget] = useState(null);
+
   // Product form modal (new or edit)
   const [productFormVisible, setProductFormVisible] = useState(false);
+
+  const lastSoldPrices = useMemo(() => {
+    if (!customerId) return {};
+    const prices = {};
+    const customerSales = (state.sales || []).filter(s => s.customerId === customerId).sort((a, b) => new Date(b.date) - new Date(a.date));
+    customerSales.forEach(sale => {
+      (sale.items || []).forEach(item => {
+        if (!prices[item.id]) {
+          prices[item.id] = item.sellingPrice;
+        }
+      });
+    });
+    return prices;
+  }, [state.sales, customerId]);
   const [formBarcode, setFormBarcode] = useState('');
   const [editingProduct, setEditingProduct] = useState(null);
 
@@ -213,20 +259,26 @@ export default function BillingScreen() {
 
   // ── Totals ──────────────────────────────────────────────
   const totals = useMemo(() => {
-    let subtotal = 0, gst = 0;
+    let subtotal = 0, gst = 0, totalWeight = 0;
     state.cart.forEach(c => {
       const qty = Number(c.qty) || 0;
       const price = Number(c.sellingPrice) || 0;
       const gstPct = Number(c.gst) || 0;
+      const wt = Number(c.weight) || 0;
       subtotal += price * qty;
       gst += price * qty * (gstPct / 100);
+      totalWeight += wt * qty;
     });
     let discount = 0;
     const val = Number(billDiscount.value) || 0;
     if (billDiscount.type === 'percent') discount = (subtotal + gst) * (val / 100);
     else if (billDiscount.type === 'flat') discount = val;
-    return { subtotal, gst, grandTotal: Math.max(0, subtotal + gst - discount), discount };
-  }, [state.cart, billDiscount]);
+
+    const freight = Number(freightCharges) || 0;
+    const labor = Number(laborCharges) || 0;
+
+    return { subtotal, gst, totalWeight, grandTotal: Math.max(0, subtotal + gst - discount) + freight + labor, discount, freight, labor };
+  }, [state.cart, billDiscount, freightCharges, laborCharges]);
 
   // ── Filtered product list for browse ─────────────────────
   const filteredProducts = useMemo(() => {
@@ -333,17 +385,45 @@ export default function BillingScreen() {
     const saleDate = state.editingSaleId
       ? state.sales.find(s => s.id === state.editingSaleId)?.date || new Date().toISOString()
       : new Date().toISOString();
+
+    const _cashPaid = paymentMode === 'Debt' ? (parseFloat(cashPaid) || 0) : totals.grandTotal;
+    const finalBankInfo = paymentMode === 'Cheque' ? bankInfo : (['Bank', 'UPI', 'RTGS/NEFT'].includes(paymentMode) ? `Date: ${bankDate}, UTR/Txn: ${utrNumber}` : '');
+
     const sale = {
-      id: saleId, date: saleDate, items: state.cart,
-      subtotal: totals.subtotal, gst: totals.gst,
-      grandTotal: totals.grandTotal, discount: totals.discount,
-      billDiscount, paymentMode, cashPaid: totals.grandTotal,
-      customerId, bankInfo,
+      id: saleId, 
+      date: saleDate, 
+      items: state.cart,
+      subtotal: totals.subtotal, 
+      gst: totals.gst,
+      grandTotal: totals.grandTotal, 
+      discount: totals.discount,
+      freight: totals.freight, 
+      labor: totals.labor,
+      roundOff: totals.roundOff,
+      billDiscount, 
+      paymentMode, 
+      cashPaid: _cashPaid,
+      bankInfo: finalBankInfo,
+      bankDate: bankDate || null,
+      utrNumber: utrNumber || null,
+      customerId: customerId || null,
+      dueDate: dueDate || null,
+      walkinName: walkinName || null,
+      walkinPan: walkinPan || null,
+      walkinGst: walkinGst || null,
+      warehouseId
     };
+
     try {
       await completeSale(sale);
       setReceiptSale(sale);
       setBillDiscount({ type: 'none', value: '0' });
+      setBankInfo('');
+      setBankDate('');
+      setUtrNumber('');
+      setCashPaid('');
+      setDueDate('');
+      setShowCheckoutModal(false);
     } catch (err) {
       Alert.alert('Error', err.message);
     }
@@ -351,40 +431,7 @@ export default function BillingScreen() {
 
   const printBill = async () => {
     if (!receiptSale) return;
-    const html = `<html><head><style>
-      body{font-family:Helvetica,Arial,sans-serif;padding:20px;color:#333}
-      h1{text-align:center;color:#000;margin-bottom:5px}
-      .sub{text-align:center;color:#666;font-size:14px;margin-bottom:30px;letter-spacing:2px;text-transform:uppercase}
-      .det{border-bottom:2px dashed #ccc;padding-bottom:20px;margin-bottom:20px}
-      .det p{margin:5px 0;font-size:14px}
-      table{width:100%;border-collapse:collapse;margin-bottom:20px}
-      th,td{text-align:left;padding:10px 0;border-bottom:1px solid #eee}
-      th{color:#666;font-size:12px;text-transform:uppercase}
-      .tot{width:100%;max-width:300px;float:right;margin-bottom:40px}
-      .tot p{display:flex;justify-content:space-between;margin:8px 0;font-size:14px}
-      .gt{font-size:20px!important;font-weight:bold;border-top:2px solid #000;padding-top:10px;margin-top:10px!important}
-      .foot{clear:both;text-align:center;margin-top:50px;font-size:12px;color:#888}
-    </style></head><body>
-      <h1>Cosmo Store</h1><div class="sub">Retail Invoice</div>
-      <div class="det">
-        <p><strong>Bill No:</strong> #${receiptSale.id.slice(-6).toUpperCase()}</p>
-        <p><strong>Date:</strong> ${new Date(receiptSale.date).toLocaleString('en-IN')}</p>
-        <p><strong>Payment:</strong> ${receiptSale.paymentMode}</p>
-      </div>
-      <table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Total</th></tr></thead>
-      <tbody>${receiptSale.items.map(i => {
-        const sav = i.mrp && i.mrp > i.sellingPrice ? i.mrp - i.sellingPrice : 0;
-        const pct = sav > 0 ? Math.round((sav / i.mrp) * 100) : 0;
-        return `<tr><td>${i.name}<br><small style="color:#666">₹${i.sellingPrice}${ i.mrp ? ` <span style="text-decoration:line-through;color:#aaa">MRP ₹${i.mrp}</span>` : '' }</small>${ sav > 0 ? `<br><small style="color:green;font-weight:bold">Save ₹${sav % 1 === 0 ? sav : sav.toFixed(2)} (${pct}% off)</small>` : '' }</td><td style="text-align:center">${i.qty}</td><td style="text-align:right">₹${(i.qty * i.sellingPrice).toFixed(2)}</td></tr>`;
-      }).join('')}</tbody></table>
-      <div class="tot">
-        <p><span>Subtotal:</span><span>₹${receiptSale.subtotal.toFixed(2)}</span></p>
-        <p><span>GST:</span><span>₹${receiptSale.gst.toFixed(2)}</span></p>
-        ${receiptSale.discount > 0 ? `<p><span>Discount:</span><span>-₹${receiptSale.discount.toFixed(2)}</span></p>` : ''}
-        <p class="gt"><span>Grand Total:</span><span>₹${receiptSale.grandTotal.toFixed(2)}</span></p>
-      </div>
-      <div class="foot">Thank you for shopping with us!</div>
-    </body></html>`;
+    const html = generateReceiptHTML(receiptSale);
     try { await RNPrint.print({ html }); } catch (e) { Alert.alert('Print Error', e.message); }
   };
 
@@ -426,165 +473,362 @@ export default function BillingScreen() {
   const renderProductItem = useCallback(({ item }) => {
     const inCart = state.cart.find(c => c.id === item.id);
     const outOfStock = item.stock <= 0;
+
+    const handlePress = () => {
+      if (outOfStock) return;
+      if (inCart) {
+        updateQty(item.id, 1);
+      } else {
+        addProductToCart(item);
+      }
+    };
+
     return (
-      <TouchableOpacity
-        style={[styles.productListItem, outOfStock && styles.productListItemDisabled]}
-        onPress={() => addProductToCart(item)}
+      <TouchableOpacity 
+        style={[styles.productGridItem, outOfStock && styles.productListItemDisabled, inCart && { borderColor: '#2563EB', borderWidth: 1.5 }]} 
+        onPress={handlePress}
         disabled={outOfStock}
         activeOpacity={0.7}
       >
-        <View style={styles.productListIcon}>
-          <Package size={18} color={outOfStock ? '#CBD5E1' : '#2563EB'} />
-        </View>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.productListName, outOfStock && { color: '#CBD5E1' }]} numberOfLines={1}>{item.name}</Text>
+          <Text style={[styles.productListName, outOfStock && { color: '#CBD5E1' }]} numberOfLines={2}>{item.name}</Text>
           <Text style={styles.productListSub}>{item.brand ? `${item.brand} • ` : ''}Stock: {item.stock}</Text>
+          <Text style={[styles.productListPrice, { marginTop: 4, color: outOfStock ? '#CBD5E1' : '#0F172A' }]}>₹{item.sellingPrice}</Text>
+          {lastSoldPrices[item.id] !== undefined && (
+            <Text style={{ fontSize: 11, color: '#2563EB', marginTop: 2, fontWeight: 'bold' }}>Last Sold: ₹{lastSoldPrices[item.id]}</Text>
+          )}
         </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={styles.productListPrice}>₹{item.sellingPrice}</Text>
-          {inCart && <View style={styles.inCartBadge}><Text style={styles.inCartText}>In Cart</Text></View>}
-        </View>
+        
+        {inCart ? (
+          <View style={{ position: 'absolute', bottom: 10, right: 10, backgroundColor: '#2563EB', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 }}>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{inCart.qty} in cart</Text>
+          </View>
+        ) : null}
       </TouchableOpacity>
     );
-  }, [state.cart, addProductToCart]);
+  }, [state.cart, addProductToCart, updateQty]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Billing</Text>
-        <Text style={styles.itemCount}>{state.cart.length} items</Text>
-      </View>
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => setShowCustomerModal(true)}>
+            <Text style={styles.title}>{t('Billing POS')}</Text>
+            <Text style={{ color: '#64748B', fontSize: 13, marginTop: 2 }}>
+              {customerId ? `For: ${state.customers?.find(c => c.id === customerId)?.name}` : 'Tap to select customer'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowCheckoutModal(true)} style={{ position: 'relative', padding: 5 }}>
+             <Package size={28} color="#0F172A" />
+             {state.cart.length > 0 && (
+               <View style={{ position: 'absolute', top: 0, right: 0, backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center' }}>
+                 <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>{state.cart.length}</Text>
+               </View>
+             )}
+          </TouchableOpacity>
+        </View>
 
-      {/* ── Barcode / Search row ── */}
-      <View style={styles.barcodeSection}>
-        <TouchableOpacity onPress={openCamera} style={styles.cameraBtn}>
-          <CameraIcon size={22} color="#2563EB" />
-        </TouchableOpacity>
-        <TextInput
-          style={styles.barcodeInput}
-          placeholder="Scan or enter barcode"
-          value={barcode}
-          onChangeText={setBarcode}
-          onSubmitEditing={handleBarcodeSubmit}
-          returnKeyType="done"
-          placeholderTextColor="#94A3B8"
-        />
-        <TouchableOpacity style={styles.addButton} onPress={handleBarcodeSubmit}>
-          <Text style={styles.addButtonText}>Add</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Product browse panel ── */}
-      <View style={styles.productPanel}>
+        {/* ── Barcode / Search row ── */}
+        <View style={styles.barcodeSection}>
+          <TouchableOpacity onPress={openCamera} style={styles.cameraBtn}>
+            <CameraIcon size={22} color="#2563EB" />
+          </TouchableOpacity>
           <TextInput
-            style={styles.productSearchInput}
-            placeholder="Search products..."
-            placeholderTextColor="#94A3B8"
+            style={styles.barcodeInput}
+            placeholder={t('Search products or scan...')}
             value={productSearch}
-            onChangeText={setProductSearch}
-            autoFocus
+            onChangeText={(txt) => { setProductSearch(txt); setBarcode(txt); }}
+            onSubmitEditing={handleBarcodeSubmit}
+            returnKeyType="search"
+            placeholderTextColor="#94A3B8"
           />
+        </View>
+
+        {/* ── Product Grid ── */}
+        <View style={{ flex: 1, paddingHorizontal: 12, marginTop: 10 }}>
           <FlatList
             data={filteredProducts}
             keyExtractor={item => item.id.toString()}
             renderItem={renderProductItem}
-            style={{ maxHeight: 260 }}
+            numColumns={2}
             keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={
-              <Text style={{ textAlign: 'center', color: '#94A3B8', padding: 20 }}>No products found</Text>
-            }
+            contentContainerStyle={{ paddingBottom: 100 }}
+            columnWrapperStyle={{ gap: 12 }}
+            ListEmptyComponent={<Text style={{ textAlign: 'center', color: '#94A3B8', padding: 20 }}>{t('No products found')}</Text>}
           />
         </View>
 
-      {/* ── Cart ── */}
-      <View style={styles.cartContainer}>
-        <FlatList
-          data={state.cart}
-          keyExtractor={item => item.id.toString()}
-          renderItem={renderCartItem}
-          initialNumToRender={15}
-          maxToRenderPerBatch={10}
-          windowSize={7}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={
-            <View style={styles.emptyCart}>
-              <ScanLine size={48} color="#CBD5E1" />
-              <Text style={styles.emptyText}>Scan or search to add items</Text>
+        {/* ── Sticky Bottom Checkout Bar ── */}
+        {state.cart.length > 0 && (
+          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', padding: 15, borderTopWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View>
+              <Text style={{ color: '#64748B', fontSize: 13, fontWeight: '600' }}>{state.cart.length} Items</Text>
+              <Text style={{ color: '#0F172A', fontSize: 22, fontWeight: '900' }}>₹{totals.grandTotal.toFixed(2)}</Text>
             </View>
-          }
-        />
-      </View>
-
-      {/* ── Totals card ── */}
-      <View style={styles.totalsCard}>
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Subtotal</Text>
-          <Text style={styles.totalValue}>₹{totals.subtotal.toFixed(2)}</Text>
-        </View>
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>GST</Text>
-          <Text style={styles.totalValue}>₹{totals.gst.toFixed(2)}</Text>
-        </View>
-
-
-
-        <View style={[styles.totalRow, { marginTop: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 10 }]}>
-          <Text style={styles.grandTotalLabel}>Grand Total</Text>
-          <Text style={styles.grandTotalValue}>₹{totals.grandTotal.toFixed(2)}</Text>
-        </View>
-
-        {paymentMode === 'Debt' && (
-           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, backgroundColor: '#f1f5f9', padding: 8, borderRadius: 6 }}>
-             <Text style={{ fontSize: 13, color: '#475569', fontWeight: 'bold' }}>
-               Customer: {customerId ? state.customers.find(c => c.id === customerId)?.name : 'None Selected'}
-             </Text>
-             <TouchableOpacity style={{ backgroundColor: '#2563eb', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 4 }} onPress={() => setShowCustomerModal(true)}>
-               <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Change</Text>
-             </TouchableOpacity>
-           </View>
-        )}
-        
-        {(paymentMode === 'Cheque' || paymentMode === 'RTGS/NEFT' || paymentMode === 'Bank') && (
-           <TextInput 
-             style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6, marginBottom: 10, fontSize: 13 }}
-             placeholder={paymentMode === 'Cheque' ? "Cheque No, Bank Name, Date" : "UTR Number, Date"}
-             value={bankInfo}
-             onChangeText={setBankInfo}
-           />
-        )}
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-          <View style={styles.paymentModes}>
-            {['Cash', 'UPI', 'Bank', 'Debt', 'Cheque', 'RTGS/NEFT'].map(m => (
-              <TouchableOpacity
-                key={m}
-                style={[styles.paymentBtn, paymentMode === m && styles.paymentBtnActive]}
-                onPress={() => {
-                   setPaymentMode(m);
-                   if (m === 'Debt' && !customerId) setShowCustomerModal(true);
-                }}
-              >
-                <Text style={[styles.paymentBtnText, paymentMode === m && styles.paymentBtnTextActive]}>
-                  {m === 'Cash' ? '💵' : m === 'UPI' ? '📱' : m === 'Bank' ? '💳' : m === 'Debt' ? '📝' : '🏦'} {m}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <TouchableOpacity style={{ backgroundColor: '#2563EB', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 }} onPress={() => setShowCheckoutModal(true)}>
+              <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold' }}>{t('View Cart')}</Text>
+            </TouchableOpacity>
           </View>
-        </ScrollView>
+        )}
+      </KeyboardAvoidingView>
 
-        <View style={styles.footerActions}>
-          <TouchableOpacity style={styles.clearButton} onPress={() => dispatch({ type: 'CLEAR_CART' })}>
-            <Trash2 size={20} color="#EF4444" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.payButton, state.cart.length === 0 && { opacity: 0.5 }]}
-            onPress={generateBill}
-            disabled={state.cart.length === 0}
-          >
-            <Text style={styles.payButtonText}>Generate Bill</Text>
-          </TouchableOpacity>
+      {/* ── Checkout Modal ── */}
+      <Modal visible={showCheckoutModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCheckoutModal(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={[styles.header, { borderBottomWidth: 1 }]}>
+            <Text style={styles.title}>{t('Cart & Checkout')}</Text>
+            <TouchableOpacity onPress={() => setShowCheckoutModal(false)} style={styles.closeBtn}>
+              <X size={24} color="#0F172A" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Cart List */}
+          <View style={[styles.cartContainer, { flex: 1, margin: 0, borderRadius: 0 }]}>
+            <FlatList
+              data={state.cart}
+              keyExtractor={item => item.id.toString()}
+              renderItem={renderCartItem}
+              contentContainerStyle={{ paddingBottom: 150 }}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                <View style={styles.emptyCart}>
+                  <ScanLine size={48} color="#CBD5E1" />
+                  <Text style={styles.emptyText}>{t('Cart is empty')}</Text>
+                </View>
+              }
+            />
+          </View>
+
+          {/* Totals Card */}
+          <View style={[styles.totalsCard, { marginHorizontal: 0, marginBottom: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopWidth: 1, borderColor: '#E2E8F0', paddingBottom: 30, maxHeight: '60%' }]}>
+            <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>{t('Subtotal')}</Text>
+              <Text style={styles.totalValue}>₹{totals.subtotal.toFixed(2)}</Text>
+            </View>
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>{t('GST')}</Text>
+              <Text style={styles.totalValue}>₹{totals.gst.toFixed(2)}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.totalLabel}>{t('Freight/Shipping')}</Text>
+                <TextInput style={[styles.discountInput, { height: 40, marginTop: 5 }]} value={freightCharges} onChangeText={setFreightCharges} keyboardType="numeric" placeholder="0.00" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.totalLabel}>{t('Labor Charges')}</Text>
+                <TextInput style={[styles.discountInput, { height: 40, marginTop: 5 }]} value={laborCharges} onChangeText={setLaborCharges} keyboardType="numeric" placeholder="0.00" />
+              </View>
+            </View>
+
+            <View style={[styles.totalRow, { marginTop: 10, borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 10 }]}>
+              <Text style={styles.grandTotalLabel}>{t('Grand Total')}</Text>
+              <Text style={styles.grandTotalValue}>₹{totals.grandTotal.toFixed(2)}</Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, backgroundColor: '#f1f5f9', padding: 8, borderRadius: 6 }}>
+              <Text style={{ fontSize: 13, color: '#475569', fontWeight: 'bold' }}>
+                Dispatch from: {warehouseId ? displayWarehouses.find(w => w.id === warehouseId)?.name : 'Main Store'}
+              </Text>
+              <TouchableOpacity style={{ backgroundColor: '#2563eb', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 4 }} onPress={() => setShowWarehouseModal(true)}>
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{t('Change')}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ marginBottom: 10, zIndex: 10 }}>
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b', marginBottom: 5 }}>{t('Customer Name')}</Text>
+              <TextInput 
+                style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', padding: 8, borderRadius: 6, fontSize: 13, color: '#0F172A' }} 
+                placeholder={t('Search or Enter New Customer')} 
+                placeholderTextColor="#94A3B8" 
+                value={customerId ? (state.customers.find(c => c.id === customerId)?.name || walkinName) : walkinName} 
+                onChangeText={(txt) => {
+                   setWalkinName(txt);
+                   if (customerId) setCustomerId('');
+                }} 
+                onFocus={() => setShowCustomerDropdown(true)}
+              />
+              {showCustomerDropdown && (
+                 <View style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 6, maxHeight: 180, marginTop: 4, elevation: 2 }}>
+                   <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled={true}>
+                     {(state.customers||[]).filter(c => c.name.toLowerCase().includes(walkinName.toLowerCase())).map(c => (
+                        <TouchableOpacity key={c.id} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }} onPress={() => {
+                          setCustomerId(c.id);
+                          setWalkinName(c.name);
+                          setWalkinPan(c.pan || '');
+                          setWalkinGst(c.gstNo || c.gst || '');
+                          setShowCustomerDropdown(false);
+                        }}>
+                          <Text style={{ color: '#0f172a', fontWeight: 'bold', fontSize: 13 }}>{c.name}</Text>
+                          <Text style={{ color: '#64748b', fontSize: 11 }}>{c.phone || 'No phone'} | Bal: ₹{c.udhaarBalance?.toFixed(2)||'0.00'}</Text>
+                        </TouchableOpacity>
+                     ))}
+                     <TouchableOpacity style={{ padding: 10, backgroundColor: '#EFF6FF', borderBottomWidth: 1, borderBottomColor: '#DBEAFE' }} onPress={() => {
+                         setCustomerForm({ name: '', phone: '', pan: '', gstNo: '' });
+                         setShowCustomerDropdown(false);
+                         setShowCustomerModal(true);
+                     }}>
+                       <Text style={{ color: '#2563EB', fontWeight: 'bold', fontSize: 13 }}>{t('+ Add New Customer')}</Text>
+                     </TouchableOpacity>
+                     {!(state.customers||[]).some(c => c.name.toLowerCase() === walkinName.toLowerCase()) && walkinName.length > 0 && (
+                        <TouchableOpacity style={{ padding: 10, backgroundColor: '#f0fdf4', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }} onPress={() => {
+                            setCustomerForm(p => ({...p, name: walkinName}));
+                            setShowCustomerDropdown(false);
+                            setShowCustomerModal(true);
+                        }}>
+                          <Text style={{ color: '#16a34a', fontWeight: 'bold', fontSize: 13 }}>+ Add "{walkinName}" to Database</Text>
+                        </TouchableOpacity>
+                     )}
+                     <TouchableOpacity style={{ padding: 10, backgroundColor: '#f8fafc' }} onPress={() => setShowCustomerDropdown(false)}>
+                        <Text style={{ color: '#475569', fontWeight: 'bold', fontSize: 13 }}>
+                          {walkinName.length > 0 ? `✓ Use "${walkinName}" as Walk-in` : 'Close List'}
+                        </Text>
+                     </TouchableOpacity>
+                   </ScrollView>
+                 </View>
+              )}
+              
+              <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+                <TextInput 
+                  style={{ flex: 1, backgroundColor: (customerId && state.customers.find(c=>c.id===customerId)?.pan) ? '#f1f5f9' : '#fff', borderWidth: 1, borderColor: '#cbd5e1', padding: 8, borderRadius: 6, fontSize: 13, color: '#0F172A' }} 
+                  placeholder={t('PAN Number')} placeholderTextColor="#94A3B8" 
+                  value={walkinPan} onChangeText={setWalkinPan} autoCapitalize="characters" 
+                  editable={!(customerId && state.customers.find(c=>c.id===customerId)?.pan)}
+                />
+                <TextInput 
+                  style={{ flex: 1, backgroundColor: (customerId && (state.customers.find(c=>c.id===customerId)?.gstNo || state.customers.find(c=>c.id===customerId)?.gst)) ? '#f1f5f9' : '#fff', borderWidth: 1, borderColor: '#cbd5e1', padding: 8, borderRadius: 6, fontSize: 13, color: '#0F172A' }} 
+                  placeholder={t('GST Number')} placeholderTextColor="#94A3B8" 
+                  value={walkinGst} onChangeText={setWalkinGst} autoCapitalize="characters" 
+                  editable={!(customerId && (state.customers.find(c=>c.id===customerId)?.gstNo || state.customers.find(c=>c.id===customerId)?.gst))}
+                />
+              </View>
+            </View>
+
+            {paymentMode === 'Debt' && (
+               <View style={{ marginBottom: 10, gap: 10 }}>
+                 <View>
+                   <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b', marginBottom: 5 }}>{t('Amount Paid Now (Advance)')}</Text>
+                   <TextInput 
+                     style={{ backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6, fontSize: 13, color: '#0F172A' }}
+                     placeholder="0.00"
+                     placeholderTextColor="#94A3B8"
+                     keyboardType="decimal-pad"
+                     value={cashPaid}
+                     onChangeText={setCashPaid}
+                   />
+                 </View>
+                 <View>
+                   <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b', marginBottom: 5 }}>{t('Remaining Balance (Udhaar)')}</Text>
+                   <View style={{ padding: 10, backgroundColor: '#FEF2F2', borderRadius: 6, borderWidth: 1, borderColor: '#FECACA' }}>
+                     <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#EF4444' }}>
+                       ₹{Math.max(0, totals.grandTotal - (parseFloat(cashPaid) || 0)).toFixed(2)}
+                     </Text>
+                   </View>
+                 </View>
+                 <View>
+                   <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b', marginBottom: 5 }}>{t('Payment Due Date (Optional)')}</Text>
+                   <TouchableOpacity 
+                     style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6 }}
+                     onPress={() => { setDatePickerTarget('dueDate'); setShowDatePicker(true); }}
+                   >
+                     <CalendarIcon size={16} color="#64748B" style={{ marginRight: 8 }} />
+                     <Text style={{ fontSize: 13, color: dueDate ? '#0F172A' : '#94A3B8' }}>{dueDate || 'YYYY-MM-DD'}</Text>
+                   </TouchableOpacity>
+                 </View>
+               </View>
+            )}
+            
+            {(paymentMode === 'Cheque' || paymentMode === 'RTGS/NEFT' || paymentMode === 'Bank' || paymentMode === 'UPI') && (
+               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+                 <TouchableOpacity 
+                   style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6 }}
+                   onPress={() => { setDatePickerTarget('bankDate'); setShowDatePicker(true); }}
+                 >
+                   <CalendarIcon size={16} color="#64748B" style={{ marginRight: 8 }} />
+                   <Text style={{ fontSize: 13, color: bankDate ? '#0F172A' : '#94A3B8' }}>{bankDate || 'Date (YYYY-MM-DD)'}</Text>
+                 </TouchableOpacity>
+                 <TextInput 
+                   style={{ flex: 1, backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6, fontSize: 13, color: '#0F172A' }}
+                   placeholder={paymentMode === 'UPI' ? "UPI Number" : "Transaction/UTR No."}
+                   placeholderTextColor="#94A3B8"
+                   value={utrNumber}
+                   onChangeText={setUtrNumber}
+                 />
+               </View>
+            )}
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+              <View style={styles.paymentModes}>
+                {['Cash', 'UPI', 'Bank', 'Debt', 'Cheque', 'RTGS/NEFT'].map(m => (
+                  <TouchableOpacity
+                    key={m}
+                    style={[styles.paymentBtn, paymentMode === m && styles.paymentBtnActive]}
+                    onPress={() => {
+                       setPaymentMode(m);
+                       if (m === 'Debt' && !customerId && !walkinName) {
+                           // focus walkinName if you want, but for now just let them be
+                       }
+                    }}
+                  >
+                    <Text style={[styles.paymentBtnText, paymentMode === m && styles.paymentBtnTextActive]}>
+                      {m === 'Cash' ? '💵' : m === 'UPI' ? '📱' : m === 'Bank' ? '💳' : m === 'Debt' ? '📝' : '🏦'} {m}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+            </ScrollView>
+
+            <View style={styles.footerActions}>
+              <TouchableOpacity style={styles.clearButton} onPress={() => { dispatch({ type: 'CLEAR_CART' }); setShowCheckoutModal(false); setCustomerId(''); setWalkinName(''); setWalkinPan(''); setWalkinGst(''); }}>
+                <Trash2 size={20} color="#EF4444" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.payButton, state.cart.length === 0 && { opacity: 0.5 }]}
+                onPress={generateBill}
+                disabled={state.cart.length === 0}
+              >
+                <Text style={styles.payButtonText}>{t('Generate Bill')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* ── Warehouse Selection Modal ── */}
+      <Modal visible={showWarehouseModal} animationType="slide" transparent={true} onRequestClose={() => setShowWarehouseModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '80%' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#0F172A' }}>{t('Select Warehouse')}</Text>
+              <TouchableOpacity onPress={() => setShowWarehouseModal(false)}>
+                <X size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              {displayWarehouses.map(wh => (
+                <TouchableOpacity 
+                  key={wh.id} 
+                  style={{ padding: 15, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', backgroundColor: warehouseId === wh.id ? '#EFF6FF' : '#FFF', borderRadius: 8 }}
+                  onPress={() => {
+                    setWarehouseId(wh.id);
+                    setShowWarehouseModal(false);
+                  }}
+                >
+                  <Text style={{ fontSize: 16, fontWeight: warehouseId === wh.id ? '700' : '500', color: warehouseId === wh.id ? '#2563EB' : '#0F172A' }}>
+                    {wh.name} {wh.id === 'main' ? '(Default)' : ''}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
         </View>
-      </View>
+      </Modal>
 
       {/* ── Scanner Modal ── */}
       <Modal visible={isScannerOpen} animationType="fade" onRequestClose={() => setIsScannerOpen(false)}>
@@ -606,15 +850,15 @@ export default function BillingScreen() {
                 {/* Corner brackets */}
                 <View style={[scan.corner, scan.tl]} /><View style={[scan.corner, scan.tr]} />
                 <View style={[scan.corner, scan.bl]} /><View style={[scan.corner, scan.br]} />
-                <Text style={scan.scanHint}>Align barcode inside the box</Text>
+                <Text style={scan.scanHint}>{t('Align barcode inside the box')}</Text>
               </Animated.View>
               <View style={scan.sideMask} />
             </View>
             <View style={scan.bottomMask}>
-              <Text style={scan.scanLabel}>📷  Auto-scanning…</Text>
+              <Text style={scan.scanLabel}>{t('📷  Auto-scanning…')}</Text>
               <TouchableOpacity style={scan.closeBtn} onPress={() => setIsScannerOpen(false)}>
                 <X size={22} color="#FFF" />
-                <Text style={scan.closeBtnText}>Cancel</Text>
+                <Text style={scan.closeBtnText}>{t('Cancel')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -635,13 +879,13 @@ export default function BillingScreen() {
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: '80%' }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Select or Add Customer</Text>
+              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{t('Select or Add Customer')}</Text>
               <TouchableOpacity onPress={() => setShowCustomerModal(false)}><X size={24} color="#64748B" /></TouchableOpacity>
             </View>
             
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 15 }}>
-              <TextInput style={{ flex: 1, borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6 }} placeholder="New Customer Name" value={customerForm.name} onChangeText={t => setCustomerForm(p => ({...p, name: t}))} />
-              <TextInput style={{ flex: 1, borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6 }} placeholder="Phone (opt)" value={customerForm.phone} onChangeText={t => setCustomerForm(p => ({...p, phone: t}))} keyboardType="numeric" />
+              <TextInput style={{ flex: 1, borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6, color: '#0F172A' }} placeholder={t('New Customer Name')} placeholderTextColor="#94A3B8" value={customerForm.name} onChangeText={t => setCustomerForm(p => ({...p, name: t}))} />
+              <TextInput style={{ flex: 1, borderWidth: 1, borderColor: '#cbd5e1', padding: 10, borderRadius: 6, color: '#0F172A' }} placeholder={t('Phone (opt)')} placeholderTextColor="#94A3B8" value={customerForm.phone} onChangeText={t => setCustomerForm(p => ({...p, phone: t}))} keyboardType="numeric" />
               <TouchableOpacity style={{ backgroundColor: '#10b981', paddingHorizontal: 15, justifyContent: 'center', borderRadius: 6 }} onPress={async () => {
                 if (!customerForm.name) return Alert.alert('Error', 'Name required');
                 const id = Date.now().toString();
@@ -657,6 +901,8 @@ export default function BillingScreen() {
             <FlatList 
               data={state.customers}
               keyExtractor={item => String(item.id)}
+              contentContainerStyle={{ paddingBottom: 150 }}
+              keyboardShouldPersistTaps="handled"
               renderItem={({item}) => (
                  <TouchableOpacity style={{ padding: 15, borderBottomWidth: 1, borderColor: '#f1f5f9' }} onPress={() => { setCustomerId(item.id); setShowCustomerModal(false); }}>
                    <Text style={{ fontSize: 16, fontWeight: '600' }}>{item.name}</Text>
@@ -672,83 +918,34 @@ export default function BillingScreen() {
       <Modal visible={!!receiptSale} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setReceiptSale(null)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
           <View style={styles.receiptHeader}>
-            <Text style={styles.receiptTitle}>Bill Generated!</Text>
+            <Text style={styles.receiptTitle}>{t('Bill Generated!')}</Text>
             <TouchableOpacity onPress={() => setReceiptSale(null)}>
               <X size={24} color="#0F172A" />
             </TouchableOpacity>
           </View>
-
-          <ScrollView contentContainerStyle={styles.receiptScroll}>
-            <View style={styles.receiptCard}>
-              <View style={styles.receiptTop}>
-                <CheckCircle2 size={48} color="#16A34A" style={{ marginBottom: 12 }} />
-                <Text style={styles.storeName}>Cosmo Store</Text>
-                <Text style={styles.receiptSubtitle}>Retail Invoice</Text>
-              </View>
-
-              <View style={styles.receiptDetails}>
-                <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabel}>Bill No:</Text>
-                  <Text style={styles.receiptValue}>#{receiptSale?.id.slice(-6).toUpperCase()}</Text>
-                </View>
-                <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabel}>Date:</Text>
-                  <Text style={styles.receiptValue}>{receiptSale ? new Date(receiptSale.date).toLocaleString('en-IN') : ''}</Text>
-                </View>
-                <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabel}>Payment:</Text>
-                  <Text style={styles.receiptValue}>{receiptSale?.paymentMode}</Text>
-                </View>
-              </View>
-
-              <View style={styles.receiptItems}>
-                {receiptSale?.items.map(item => {
-                  const saving = item.mrp && item.mrp > item.sellingPrice ? item.mrp - item.sellingPrice : 0;
-                  const discountPct = saving > 0 ? Math.round((saving / item.mrp) * 100) : 0;
-                  return (
-                    <View key={item.id} style={styles.receiptItemRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.receiptItemName}>{item.name}</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={styles.receiptItemQty}>{item.qty} × ₹{item.sellingPrice}</Text>
-                          {item.mrp ? <Text style={[styles.receiptItemQty, { textDecorationLine: 'line-through', color: '#94A3B8' }]}>MRP ₹{item.mrp}</Text> : null}
-                        </View>
-                        {saving > 0 ? (
-                          <Text style={{ fontSize: 12, color: '#16A34A', fontWeight: '700', marginTop: 2 }}>
-                            Save ₹{saving.toFixed(saving % 1 === 0 ? 0 : 2)} ({discountPct}% off)
-                          </Text>
-                        ) : null}
-                      </View>
-                      <Text style={styles.receiptItemTotal}>₹{(item.qty * item.sellingPrice).toFixed(2)}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-
-              <View style={styles.receiptTotals}>
-                <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Subtotal</Text><Text style={styles.receiptValue}>₹{receiptSale?.subtotal.toFixed(2)}</Text></View>
-                <View style={styles.receiptRow}><Text style={styles.receiptLabel}>GST</Text><Text style={styles.receiptValue}>₹{receiptSale?.gst.toFixed(2)}</Text></View>
-                {receiptSale?.discount > 0 && (
-                  <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Discount</Text><Text style={[styles.receiptValue, { color: '#16A34A' }]}>-₹{receiptSale.discount.toFixed(2)}</Text></View>
-                )}
-                <View style={[styles.receiptRow, styles.receiptGrandTotalRow]}>
-                  <Text style={styles.receiptGrandTotalLabel}>Grand Total</Text>
-                  <Text style={styles.receiptGrandTotalValue}>₹{receiptSale?.grandTotal.toFixed(2)}</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.modalActionButtons}>
+          <ScrollView style={styles.receiptScroll} contentContainerStyle={{ padding: 15, alignItems: 'center' }}>
+            <Receipt sale={receiptSale} />
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 20, width: '100%' }}>
               <TouchableOpacity style={styles.printBtn} onPress={printBill}>
-                <Text style={styles.printBtnText}>Print Bill</Text>
+                <Text style={styles.printBtnText}>{t('Print Bill')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.doneBtn} onPress={() => setReceiptSale(null)}>
-                <Text style={styles.doneBtnText}>Done</Text>
+                <Text style={styles.doneBtnText}>{t('Done')}</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
         </SafeAreaView>
       </Modal>
+      {/* ── Date Picker Modal ── */}
+      <DatePickerModal 
+        visible={showDatePicker}
+        onClose={() => setShowDatePicker(false)}
+        onSelect={(date) => {
+          if (datePickerTarget === 'bankDate') setBankDate(date);
+          else if (datePickerTarget === 'dueDate') setDueDate(date);
+          setShowDatePicker(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -798,6 +995,23 @@ const styles = StyleSheet.create({
   // Product browse panel
   productPanel: { marginHorizontal: 16, marginTop: 10, backgroundColor: '#FFFFFF', borderRadius: 16, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 4, overflow: 'hidden' },
   productSearchInput: { margin: 12, backgroundColor: '#F1F5F9', padding: 12, borderRadius: 12, fontSize: 15, color: '#0F172A' },
+  productGridItem: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+    minHeight: 90,
+    justifyContent: 'space-between',
+  },
+  closeBtn: { padding: 6, backgroundColor: '#F1F5F9', borderRadius: 10 },
   productListItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#F1F5F9', gap: 12 },
   productListItemDisabled: { opacity: 0.45 },
   productListIcon: { width: 36, height: 36, backgroundColor: '#EFF6FF', borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
@@ -855,7 +1069,7 @@ const styles = StyleSheet.create({
   // Receipt
   receiptHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderColor: '#E2E8F0' },
   receiptTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A' },
-  receiptScroll: { padding: 20, alignItems: 'center' },
+  receiptScroll: { padding: 20 },
   receiptCard: { width: '100%', backgroundColor: '#FFFFFF', padding: 24, borderRadius: 16, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 4 },
   receiptTop: { alignItems: 'center', marginBottom: 20, paddingBottom: 20, borderBottomWidth: 2, borderBottomColor: '#F1F5F9', borderStyle: 'dashed' },
   storeName: { fontSize: 24, fontWeight: '900', color: '#0F172A', marginBottom: 4 },

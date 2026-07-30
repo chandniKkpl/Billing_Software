@@ -1,3 +1,4 @@
 "use client";
-import SalesReport from "../../views/SalesReport";
-export default function Page() { return <SalesReport />; }
+import Reports from '../../views/Reports';
+export default function ReportsPage() {
+  return <Reports />; }

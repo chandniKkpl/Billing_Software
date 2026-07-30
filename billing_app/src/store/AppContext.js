@@ -3,6 +3,8 @@ import CryptoJS from 'crypto-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { NotificationManager } from '../utils/NotificationManager';
+import { translations } from '../utils/i18n';
 
 const AppContext = createContext(null);
 const SECRET_KEY = 'cosmo_store_super_secret_key_2026';
@@ -18,7 +20,7 @@ async function decryptData(key) {
     try {
       const fallback = await AsyncStorage.getItem(key);
       return fallback ? JSON.parse(fallback) : [];
-    } catch {
+    } catch (e) {
       return [];
     }
   }
@@ -26,9 +28,10 @@ async function decryptData(key) {
 
 export function AppProvider({ children }) {
   const [state, setState] = useState({
-    products: [], sales: [], customers: [], vendors: [], ledgerTransactions: [], accounts: [],
+    products: [], sales: [], customers: [], vendors: [], ledgerTransactions: [], accounts: [], assets: [],
     cart: [], editingSaleId: null, lang: 'en', loading: true
   });
+  const [isDrawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     async function initLang() {
@@ -37,13 +40,15 @@ export function AppProvider({ children }) {
     }
     initLang();
 
-    const collections = ['products', 'sales', 'customers', 'vendors', 'accounts', 'ledgerTransactions'];
+    const collections = ['products', 'sales', 'customers', 'vendors', 'accounts', 'ledgerTransactions', 'assets'];
     const unsubs = collections.map(coll => {
       return onSnapshot(collection(db, coll), snap => {
         const data = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
         setState(prev => ({ ...prev, [coll]: data }));
       });
     });
+
+    NotificationManager.requestPermission();
 
     // Auto Migration from AsyncStorage to Firebase
     async function runMigration() {
@@ -86,10 +91,19 @@ export function AppProvider({ children }) {
 
     setTimeout(() => runMigration(), 3000);
 
-    return () => {
-      unsubs.forEach(unsub => unsub());
-    };
+    return () => unsubs.forEach(unsub => unsub());
   }, []);
+
+  useEffect(() => {
+    if (!state.loading) {
+      const allAccounts = [
+        ...(state.customers || []),
+        ...(state.vendors || []),
+        ...(state.accounts || [])
+      ];
+      NotificationManager.syncDuesNotifications(allAccounts);
+    }
+  }, [state.customers, state.vendors, state.accounts, state.loading]);
 
   const dispatch = (action) => {
     switch (action.type) {
@@ -238,15 +252,18 @@ export function AppProvider({ children }) {
       }
     });
 
-    if (sale.paymentMode === 'Debt' && sale.customerId && !existingIndex >= 0) {
+    if (sale.paymentMode === 'Debt' && sale.customerId && existingIndex < 0) {
       const customer = state.customers.find(c => c.id === sale.customerId);
       if (customer) {
-        const newBalance = (customer.udhaarBalance || 0) + sale.grandTotal;
+        const cashPaid = sale.cashPaid !== undefined ? sale.cashPaid : 0;
+        const addedDebt = sale.grandTotal - cashPaid;
+        const newBalance = (customer.udhaarBalance || 0) + addedDebt;
         batch.set(doc(db, 'customers', String(customer.id)), { udhaarBalance: newBalance }, { merge: true });
       }
     }
 
-    batch.set(doc(db, 'sales', String(sale.id)), sale);
+    const cleanSale = JSON.parse(JSON.stringify(sale, (k, v) => (v === undefined ? null : v)));
+    batch.set(doc(db, 'sales', String(sale.id)), cleanSale);
     
     await batch.commit();
     dispatch({ type: 'CLEAR_CART' });
@@ -272,10 +289,21 @@ export function AppProvider({ children }) {
     await batch.commit();
   };
 
+  const editBill = (sale) => {
+    dispatch({ type: 'SET_CART', payload: sale.items });
+    dispatch({ type: 'SET_EDITING_SALE', payload: sale.id });
+  };
+
   const setLang = (l) => dispatch({ type: 'SET_LANG', payload: l });
+
+  const t = (key) => {
+    if (state.lang === 'hi' && translations[key]) return translations[key];
+    return key;
+  };
 
   const value = {
     state,
+    isDrawerOpen,
     dispatch,
     addProduct,
     updateProduct,
@@ -284,13 +312,16 @@ export function AppProvider({ children }) {
     completeSale,
     updateSale,
     deleteSale,
+    editBill,
     addCustomer,
     updateCustomer,
     deleteCustomer,
     addVendor, updateVendor, deleteVendor,
     addAccount, updateAccount, deleteAccount,
     addLedgerTransaction,
-    setLang
+    setLang,
+    setDrawerOpen,
+    t
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

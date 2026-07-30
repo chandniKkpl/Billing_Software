@@ -357,6 +357,14 @@ tr:last-child td { border-bottom: none; }
     font-family: 'Courier New', monospace; font-size: 11px; color: #000;
     background: #fff; padding: 10px;
   }
+  
+  .print-report, .print-report * { visibility: visible; }
+  .print-report {
+    position: absolute; left: 0; top: 0;
+    width: 100%;
+    background: #fff; color: #000;
+    display: block !important;
+  }
 }
 .receipt-print { font-family: 'Courier New', monospace; font-size: 12px; color: var(--text); line-height: 1.5; }
 .receipt-divider { border: none; border-top: 1px dashed var(--text3); margin: 8px 0; }
@@ -524,3 +532,6 @@ tr:last-child td { border-bottom: none; }
   .report-filter-bar { gap: 6px; }
   .report-period-btn { padding: 6px 10px; font-size: 0.72rem; }
 }
+
+@keyframes spin { 100% { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
