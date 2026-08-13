@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { useT } from '../i18n/translations';
-import { TrendingUp, Package, AlertTriangle, IndianRupee, Search, Calendar, Clock, MessageCircle } from 'lucide-react';
+import { TrendingUp, Package, AlertTriangle, IndianRupee, Search, Calendar, Clock, MessageCircle, Bot, Mic } from 'lucide-react';
 import Receipt from '../components/Receipt';
+import WinTogetherAssistantOverlay from '../components/assistant/WinTogetherAssistantOverlay';
 
 function fmt(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
 
@@ -14,6 +15,7 @@ export default function Dashboard({ setPage }) {
   const [selectedSale, setSelectedSale] = useState(null);
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('');
+  const [assistantOpen, setAssistantOpen] = useState(false);
 
   const todaySales = state.sales.filter(s => new Date(s.date).toDateString() === getToday());
   const todayRevenue = todaySales.reduce((a, s) => a + s.grandTotal, 0);
@@ -71,6 +73,23 @@ export default function Dashboard({ setPage }) {
             <div className="stat-sub">Need restocking</div>
             <div className="stat-icon">⚠️</div>
           </div>
+        </div>
+
+        <div className="assistant-dashboard-card">
+          <div className="assistant-dashboard-copy">
+            <div className="assistant-dashboard-badge"><Bot size={16} /> WinTogether AI</div>
+            <h3>Your Smart Business Assistant</h3>
+            <p>Speak naturally to search products, check balance, view today's sales, find low stock, create bills, and send reminders with confirmation.</p>
+            <div className="assistant-dashboard-examples">
+              <span>"Aaj ki sale batao"</span>
+              <span>"Low stock dikhao"</span>
+              <span>"Rahul ka balance batao"</span>
+              <span>"Bill bana do"</span>
+            </div>
+          </div>
+          <button className="btn btn-primary btn-lg" onClick={() => setAssistantOpen(true)}>
+            <Mic size={18} /> Talk to WinTogether AI
+          </button>
         </div>
 
         <div className="dash-grid">
@@ -201,6 +220,7 @@ export default function Dashboard({ setPage }) {
         </div>
       </div>
       {selectedSale && <Receipt sale={selectedSale} onClose={() => setSelectedSale(null)} setPage={setPage} />}
+      <WinTogetherAssistantOverlay open={assistantOpen} onClose={() => setAssistantOpen(false)} onMinimize={() => setAssistantOpen(false)} />
     </div>
   );
 }

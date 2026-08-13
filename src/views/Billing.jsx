@@ -7,39 +7,7 @@ import { showToast } from '../components/Toast';
 import ProductSearch from '../components/billing/ProductSearch';
 import BillingCart from '../components/billing/BillingCart';
 import CheckoutForm from '../components/billing/CheckoutForm';
-
-function calcTotals(cart, billDiscount = { type: 'none', value: 0 }, roundOff = '') {
-  let subtotal = 0;
-  let gst = 0;
-  cart.forEach(c => {
-    const qty = Number(c.qty) || 0;
-    const price = Number(c.sellingPrice) || 0;
-    const itemGstPct = Number(c.gst) || 0;
-    subtotal += price * qty;
-    gst += (price * qty) * (itemGstPct / 100);
-  });
-
-  let discount = 0;
-  const val = Number(billDiscount.value) || 0;
-  if (billDiscount.type === 'percent') {
-    discount = (subtotal + gst) * (val / 100);
-  } else if (billDiscount.type === 'flat') {
-    discount = val;
-  }
-
-  const freight = Number(billDiscount.freight) || 0;
-  const labor = Number(billDiscount.labor) || 0;
-  let grandTotal = Math.max(0, subtotal + gst - discount) + freight + labor;
-  
-  let actualRoundOff = 0;
-  if (roundOff.trim() !== '') {
-    const finalGrandTotal = Number(roundOff) || 0;
-    actualRoundOff = finalGrandTotal - grandTotal;
-    grandTotal = finalGrandTotal;
-  }
-
-  return { subtotal, gst, grandTotal, discount, freight, labor, roundOff: actualRoundOff };
-}
+import { buildSalePayload, calcSaleTotals } from '../lib/sales';
 
 export default function Billing() {
   const { state, dispatch, completeSale, addCustomer } = useApp();
@@ -172,60 +140,26 @@ export default function Billing() {
     }
   };
 
-  const { subtotal, gst, grandTotal, discount, freight, labor, roundOff: actualRoundOff } = calcTotals(state.cart, billDiscount, roundOff);
+   const { subtotal, gst, grandTotal, discount } = calcSaleTotals(state.cart, billDiscount, roundOff);
   const change = cashPaid ? Math.max(0, parseFloat(cashPaid) - grandTotal) : 0;
 
   const generateBill = async () => {
     if (state.cart.length === 0) { showToast('Cart is empty!', 'error'); return; }
-    
-    // If editing an existing sale, keep the old ID and date, else create new
-    const existingSale = state.editingSaleId ? state.sales.find(s => s.id === state.editingSaleId) : null;
-    const saleId = existingSale ? existingSale.id : Date.now().toString();
-    const saleDate = existingSale ? existingSale.date : new Date().toISOString();
 
-    let finalBankInfo = '';
-    if (['RTGS', 'NEFT'].includes(paymentMode)) {
-      if (!bankDetails.utr || !bankDetails.date) {
-        return showToast(`Please enter UTR Number and Date for ${paymentMode}`, 'error');
-      }
-      finalBankInfo = `UTR: ${bankDetails.utr} | Date: ${bankDetails.date}`;
-    } else if (paymentMode === 'Cheque') {
-      if (!bankDetails.chequeNo || !bankDetails.bankName || !bankDetails.date) {
-        return showToast('Please enter Cheque Number, Bank Name, and Date', 'error');
-      }
-      finalBankInfo = `Chq: ${bankDetails.chequeNo} | Bank: ${bankDetails.bankName} | Date: ${bankDetails.date}`;
-    }
-
-    const selectedCustObj = selectedCustomerId ? (state.customers || []).find(c => String(c.id) === String(selectedCustomerId)) : null;
-    const maxBillNo = Math.max(0, ...(state.sales || []).map(s => Number(s.billNo) || 0));
-    const nextBillNo = state.editingSaleId
-      ? (state.sales.find(s => s.id === state.editingSaleId)?.billNo || (maxBillNo > 0 ? maxBillNo + 1 : 1001))
-      : (maxBillNo > 0 ? maxBillNo + 1 : 1001);
-
-    const sale = {
-      id: saleId,
-      billNo: nextBillNo,
-      date: saleDate,
-      items: state.cart,
-      subtotal, gst, grandTotal, discount,
-      freight, labor, roundOff: actualRoundOff,
-      billDiscount,
-      paymentMode,
-      bankInfo: finalBankInfo,
-      dueDate: paymentMode === 'Debt' ? dueDate : null,
-      customerId: selectedCustomerId || null,
-      customerName: selectedCustObj?.name || null,
-      customerPhone: selectedCustObj?.phone || null,
-      customerGst: selectedCustObj?.gst || selectedCustObj?.gstNo || null,
-      customerPan: selectedCustObj?.pan || null,
-      cashPaid: paymentMode === 'Cash' ? (parseFloat(cashPaid) || grandTotal) : (paymentMode === 'Debt' ? (parseFloat(cashPaid) || 0) : grandTotal),
-      warehouseId
-    };
-    if (paymentMode === 'Debt' && !selectedCustomerId) {
-      showToast('Please select a customer for Debt', 'error');
-      return;
-    }
     try {
+      const sale = buildSalePayload({
+        state,
+        cart: state.cart,
+        paymentMode,
+        bankDetails,
+        cashPaid,
+        dueDate,
+        selectedCustomerId,
+        warehouseId,
+        billDiscount,
+        roundOff,
+        editingSaleId: state.editingSaleId,
+      });
       await completeSale(sale);
       setReceipt(sale);
       setPaymentMode('Cash');

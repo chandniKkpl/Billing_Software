@@ -12,12 +12,13 @@ const firebaseConfig = {
   measurementId: "G-N6QT2E9FXF"
 };
 
-import { getAI, VertexAIBackend } from "firebase/ai";
+import { getAI, GoogleAIBackend } from "firebase/ai";
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
-export const ai = getAI(app, { backend: new VertexAIBackend() });
+// Gemini Developer API via Firebase AI Logic (Spark plan compatible once AI Logic is enabled).
+export const ai = getAI(app, { backend: new GoogleAIBackend() });
 
 // Enable offline persistence
 if (typeof window !== 'undefined') {
