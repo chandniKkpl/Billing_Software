@@ -74,7 +74,7 @@ export default function Dashboard({ setPage }) {
             <div className="stat-icon">⚠️</div>
           </div>
         </div>
-
+        {/* 
         <div className="assistant-dashboard-card">
           <div className="assistant-dashboard-copy">
             <div className="assistant-dashboard-badge"><Bot size={16} /> WinTogether AI</div>
@@ -90,13 +90,13 @@ export default function Dashboard({ setPage }) {
           <button className="btn btn-primary btn-lg" onClick={() => setAssistantOpen(true)}>
             <Mic size={18} /> Talk to WinTogether AI
           </button>
-        </div>
+        </div> */}
 
         <div className="dash-grid">
           {/* Bill History */}
           <div className="card">
             <h3 style={{ marginBottom: 16, fontSize: '0.95rem', fontWeight: 700 }}>📜 Bill History (Click to View/Edit)</h3>
-            
+
             <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
               <div style={{ flex: 1, position: 'relative' }}>
                 <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
@@ -109,13 +109,13 @@ export default function Dashboard({ setPage }) {
                 />
               </div>
               <div style={{ width: '140px', position: 'relative' }}>
-                 <Calendar size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
-                 <input 
-                   type="date" 
-                   value={dateFilter} 
-                   onChange={e => setDateFilter(e.target.value)} 
-                   style={{ padding: '8px 10px 8px 32px', width: '100%', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg2)', color: 'var(--text1)', outline: 'none' }}
-                 />
+                <Calendar size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
+                <input
+                  type="date"
+                  value={dateFilter}
+                  onChange={e => setDateFilter(e.target.value)}
+                  style={{ padding: '8px 10px 8px 32px', width: '100%', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg2)', color: 'var(--text1)', outline: 'none' }}
+                />
               </div>
             </div>
 
@@ -168,7 +168,7 @@ export default function Dashboard({ setPage }) {
               </ul>
             )}
           </div>
-          
+
           {/* Upcoming Dues & Reminders */}
           <div className="card">
             <h3 style={{ marginBottom: 16, fontSize: '0.95rem', fontWeight: 700, color: 'var(--red)', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -182,9 +182,9 @@ export default function Dashboard({ setPage }) {
                   const daysLeft = Math.ceil((new Date(acc.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
                   const isOverdue = daysLeft < 0;
                   return (
-                    <li 
-                      key={acc.id} 
-                      className="low-stock-item" 
+                    <li
+                      key={acc.id}
+                      className="low-stock-item"
                       style={{ borderLeft: isOverdue ? '3px solid var(--red)' : '3px solid var(--orange)', paddingLeft: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                       onClick={() => {
                         if (acc.phone) {
