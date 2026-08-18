@@ -182,6 +182,34 @@ export function AppProvider({ children }) {
     const id = enq.id || Date.now().toString();
     await setDoc(doc(db, 'enquiries', id), { ...enq, id, date: new Date().toISOString() });
   };
+  const updateEnquiry = async (enq) => {
+    await setDoc(doc(db, 'enquiries', String(enq.id)), enq, { merge: true });
+  };
+  const deleteEnquiry = async (id) => {
+    await deleteDoc(doc(db, 'enquiries', String(id)));
+  };
+
+  const addAsset = async (asset) => {
+    const id = asset.id || Date.now().toString();
+    await setDoc(doc(db, 'assets', id), { ...asset, id, updatedAt: new Date().toISOString() });
+  };
+  const updateAsset = async (asset) => {
+    await setDoc(doc(db, 'assets', String(asset.id)), { ...asset, updatedAt: new Date().toISOString() }, { merge: true });
+  };
+  const deleteAsset = async (id) => {
+    await deleteDoc(doc(db, 'assets', String(id)));
+  };
+
+  const addWarehouse = async (wh) => {
+    const id = wh.id || Date.now().toString();
+    await setDoc(doc(db, 'warehouses', id), { ...wh, id });
+  };
+  const updateWarehouse = async (wh) => {
+    await setDoc(doc(db, 'warehouses', String(wh.id)), wh, { merge: true });
+  };
+  const deleteWarehouse = async (id) => {
+    await deleteDoc(doc(db, 'warehouses', String(id)));
+  };
 
   const addVendor = async (vendor) => {
     const id = vendor.id || Date.now().toString();
@@ -472,7 +500,9 @@ export function AppProvider({ children }) {
     addCustomer,
     updateCustomer,
     deleteCustomer,
-    addEnquiry,
+    addEnquiry, updateEnquiry, deleteEnquiry,
+    addAsset, updateAsset, deleteAsset,
+    addWarehouse, updateWarehouse, deleteWarehouse,
     addVendor, updateVendor, deleteVendor,
     addAccount, updateAccount, deleteAccount,
     addLedgerTransaction,
