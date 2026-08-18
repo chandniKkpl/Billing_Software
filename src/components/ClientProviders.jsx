@@ -5,6 +5,7 @@ import { AppProvider } from '../store/AppContext';
 import { ToastProvider } from './Toast';
 import Sidebar from './Sidebar';
 import Login from '../views/Login';
+import VoiceAssistant from './VoiceAssistant';
 
 export default function ClientProviders({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -41,6 +42,7 @@ export default function ClientProviders({ children }) {
             {children}
           </main>
         </div>
+        <VoiceAssistant />
       </ToastProvider>
     </AppProvider>
   );

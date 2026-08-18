@@ -178,6 +178,11 @@ export function AppProvider({ children }) {
     await deleteDoc(doc(db, 'customers', String(id)));
   };
 
+  const addEnquiry = async (enq) => {
+    const id = enq.id || Date.now().toString();
+    await setDoc(doc(db, 'enquiries', id), { ...enq, id, date: new Date().toISOString() });
+  };
+
   const addVendor = async (vendor) => {
     const id = vendor.id || Date.now().toString();
     await setDoc(doc(db, 'vendors', id), { ...vendor, id, balance: vendor.balance || 0 });
@@ -467,6 +472,7 @@ export function AppProvider({ children }) {
     addCustomer,
     updateCustomer,
     deleteCustomer,
+    addEnquiry,
     addVendor, updateVendor, deleteVendor,
     addAccount, updateAccount, deleteAccount,
     addLedgerTransaction,
