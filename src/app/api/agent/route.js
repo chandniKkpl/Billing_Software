@@ -29,38 +29,38 @@ export async function POST(req) {
         },
         {
           name: "add_customer",
-          description: "Add a new customer to the database.",
+          description: "Add a new customer to the database once Name, Phone number, and Udhaar balance are provided.",
           parameters: {
             type: "OBJECT",
             properties: {
               name: { type: "STRING", description: "Customer's full name" },
-              phone: { type: "STRING", description: "Customer's phone number" },
+              phone: { type: "STRING", description: "Customer's phone number (Required)" },
               address: { type: "STRING", description: "Customer's address" },
-              udhaarBalance: { type: "NUMBER", description: "Customer's opening debt or balance" }
+              udhaarBalance: { type: "NUMBER", description: "Customer's opening debt or balance (Required, 0 if none)" }
             },
-            required: ["name"]
+            required: ["name", "phone", "udhaarBalance"]
           }
         },
         {
           name: "add_product",
-          description: "Add a new product to the inventory.",
+          description: "Add a new product to the inventory once Name, Selling Price, and Stock are provided.",
           parameters: {
             type: "OBJECT",
             properties: {
               name: { type: "STRING", description: "Name of the product" },
-              sellingPrice: { type: "NUMBER", description: "Selling price of the product" },
-              stock: { type: "NUMBER", description: "Initial stock quantity" }
+              sellingPrice: { type: "NUMBER", description: "Selling price of the product (Required)" },
+              stock: { type: "NUMBER", description: "Initial stock quantity (Required)" }
             },
             required: ["name", "sellingPrice", "stock"]
           }
         },
         {
           name: "add_to_cart",
-          description: "Add an item/product to the cart (for both billing and purchase entry) by its ID.",
+          description: "Add an item/product to the cart (for both billing and purchase entry) by its ID or name.",
           parameters: {
             type: "OBJECT",
             properties: {
-              product_id: { type: "STRING", description: "The exact ID of the product to add to the cart." },
+              product_id: { type: "STRING", description: "The product name or ID to add to the cart." },
               qty: { type: "NUMBER", description: "The quantity to add. Defaults to 1 if not specified." }
             },
             required: ["product_id"]
@@ -80,12 +80,12 @@ export async function POST(req) {
     }];
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents: messages,
       config: {
-        systemInstruction: systemInstruction + "\n\nCRITICAL RULE: You MUST always provide a brief conversational response in text, even when you are making a tool call. Never return ONLY a tool call. For example, if you call navigate_to('billing'), you must also output text like 'Main billing page par ja raha hu.'",
+        systemInstruction: (systemInstruction || "") + "\n\nCRITICAL CONVERSATIONAL & MANDATORY INFO RULE:\n1. When the user asks to navigate AND perform an action (e.g. go to customer page and add a customer), execute 'navigate_to' immediately.\n2. If mandatory details are missing (e.g. Customer requires Name, Phone number, and Udhaar balance; Product requires Name, Selling Price, and Stock), DO NOT call the add tool yet. Instead, in your conversational text response, ask the user to provide the missing details (e.g. 'Thik hai, mai customers page par ja raha hu. Kripya Ayushi tester ka mobile number aur udhaar balance batayein.').\n3. When the user provides the missing details, call the add tool and confirm.",
         tools: tools,
-        temperature: 0.2
+        temperature: 0.1
       }
     });
 

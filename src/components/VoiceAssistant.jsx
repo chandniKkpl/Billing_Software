@@ -5,6 +5,7 @@ import { Mic, MicOff, Loader2, Volume2 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { useApp } from '../store/AppContext';
 import { useRouter } from 'next/navigation';
+import { showToast } from './Toast';
 import Receipt from './Receipt';
 
 export default function VoiceAssistant() {
@@ -16,6 +17,8 @@ export default function VoiceAssistant() {
   const [isConversationActive, setIsConversationActive] = useState(false);
   const [activeReceiptSale, setActiveReceiptSale] = useState(null);
   const isConversationActiveRef = useRef(false);
+  const isSpeakingRef = useRef(false);
+  const currentAudioRef = useRef(null);
   const silenceTimerRef = useRef(null);
   const finalTranscriptRef = useRef('');
   const currentTranscriptRef = useRef('');
@@ -39,10 +42,17 @@ export default function VoiceAssistant() {
         recognition.lang = 'hi-IN'; // Set to Hindi/Indian accent by default
 
         recognition.onstart = () => {
-          setIsListening(true);
+          if (!isSpeakingRef.current) {
+            setIsListening(true);
+          }
         };
 
         recognition.onresult = (event) => {
+          // CRITICAL: If AI is currently speaking, do NOT capture audio
+          if (isSpeakingRef.current) {
+            return;
+          }
+
           let currentInterim = '';
           let currentFinal = '';
           
@@ -63,8 +73,8 @@ export default function VoiceAssistant() {
           silenceTimerRef.current = setTimeout(() => {
              // 2.5 seconds of silence means user has finished speaking their sentence
              const textToProcess = finalTranscriptRef.current + currentFinal;
-             if (textToProcess.trim() && isConversationActiveRef.current) {
-                recognition.stop(); // Temporarily stop to process
+             if (textToProcess.trim() && isConversationActiveRef.current && !isSpeakingRef.current) {
+                try { recognition.stop(); } catch(e) {}
                 processVoiceCommand(textToProcess);
                 finalTranscriptRef.current = ''; // Reset for next turn
                 currentTranscriptRef.current = ''; // Clear unprocessed
@@ -85,8 +95,6 @@ export default function VoiceAssistant() {
 
         recognition.onend = () => {
           setIsListening(false);
-          // If conversation is still active and we are not processing, try to restart (e.g. if it stopped due to a glitch)
-          // We don't restart immediately if it was stopped on purpose to process a command.
         };
 
         recognitionRef.current = recognition;
@@ -94,7 +102,7 @@ export default function VoiceAssistant() {
         console.warn("Speech Recognition API is not supported in this browser.");
       }
     }
-  }, []); // Note: leaving deps empty as we want to setup once
+  }, []);
 
   const toggleListen = () => {
     if (!recognitionRef.current) return alert("Browser does not support voice recognition");
@@ -103,15 +111,22 @@ export default function VoiceAssistant() {
       // Stop completely
       setIsConversationActive(false);
       isConversationActiveRef.current = false;
+      setIsSpeaking(false);
+      isSpeakingRef.current = false;
       clearTimeout(silenceTimerRef.current);
-      recognitionRef.current.stop();
+      try { recognitionRef.current.stop(); } catch(e) {}
       setIsListening(false);
+
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
       
-      // Process whatever the user said right before clicking stop
-      if (currentTranscriptRef.current.trim() && !isProcessing) {
+      // Process whatever the user said right before clicking stop (if not speaking)
+      if (currentTranscriptRef.current.trim() && !isProcessing && !isSpeakingRef.current) {
         processVoiceCommand(currentTranscriptRef.current);
         currentTranscriptRef.current = '';
       }
@@ -119,6 +134,8 @@ export default function VoiceAssistant() {
       // Start conversation mode
       setIsConversationActive(true);
       isConversationActiveRef.current = true;
+      setIsSpeaking(false);
+      isSpeakingRef.current = false;
       setTranscript('');
       setAiText('');
       finalTranscriptRef.current = '';
@@ -127,7 +144,6 @@ export default function VoiceAssistant() {
     }
   };
 
-  
   const processVoiceCommand = async (text) => {
     if (!text.trim()) return;
     setIsProcessing(true);
@@ -149,26 +165,49 @@ export default function VoiceAssistant() {
         })
         .reduce((total, sale) => total + sale.grandTotal, 0);
 
-      const systemInstruction = `You are an Omnipotent Voice Assistant embedded in Cosmo Store billing software. 
-      You speak Hindi (transliterated) and English. 
-      You have FULL CONTROL over the application through your tools. You can execute multi-step workflows autonomously (e.g. searching a customer, adding products to cart, and generating a bill).
-      
-      Current App State Summary:
-      - Total Sales today: ₹${todaysSales}
-      - Products in inventory: ${(stateRef.current.products || []).map(p => `[ID: ${p.id}] ${p.name} - ₹${p.sellingPrice} (Stock: ${p.stock || 0})`).join(', ')}
-      - Existing Customers: ${(stateRef.current.customers || []).map(c => `[ID: ${c.id}] ${c.name} - ${c.phone}`).join(', ')}
-      - Cart Items: ${(stateRef.current.cart || []).length}
-      
-      CRITICAL RULES FOR AUTONOMOUS MODE:
-      1. If the user asks for a complex task (e.g. "Rahul ka bill banao 2 Circle ka cash me"), you MUST execute multiple tools sequentially in a loop:
-         a) Call 'manage_cart' to add 2 Circle products.
-         b) Call 'generate_bill' with the customerId of Rahul and paymentMode Cash.
-         c) Call 'navigate_to' to show the receipt.
-      2. If you don't know an exact ID, look it up in the context provided above.
-      3. For CREATE/ADD tools, always ask the user for missing MANDATORY info if not provided in their prompt.
-      4. DO NOT make up data.
-      5. ONLY speak the final text once all steps are completed.
-      6. Always output a final text response describing what you did.`;
+      const systemInstruction = `You are an intelligent, proactive voice assistant for Cosmo Store billing and retail management software.
+You speak in friendly, natural Hindi / Hinglish (or English).
+You have FULL CAPABILITY to execute multiple tools and multi-step conversational workflows.
+
+CURRENT APP STATE SUMMARY:
+- Total Sales Today: ₹${todaysSales}
+- Products in Inventory: ${(stateRef.current.products || []).map(p => `[ID: ${p.id}] ${p.name} - ₹${p.sellingPrice} (Stock: ${p.stock || 0})`).join(', ') || 'No products yet'}
+- Existing Customers: ${(stateRef.current.customers || []).map(c => `[ID: ${c.id}] ${c.name}${c.phone ? ` (${c.phone})` : ''} - Udhaar: ₹${c.udhaarBalance || 0}`).join(', ') || 'No customers yet'}
+- Cart Items: ${(stateRef.current.cart || []).map(i => `${i.name} (x${i.qty || 1})`).join(', ') || 'Empty'}
+
+CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
+1. COMPOUND COMMANDS (NAVIGATION + ACTIONS):
+   - When a user asks to navigate to a page AND perform an action (e.g. "Customer page par jao aur Ayushi tester customer add karo" or "Inventory me jao aur Parle-G add karo"):
+     * ALWAYS call 'navigate_to' immediately to go to that page.
+     * Check if the user has provided ALL mandatory details for the requested action.
+
+2. ADDING / MANAGING CUSTOMERS (MANDATORY FIELDS):
+   - MANDATORY details required to add a customer: (1) Customer Name, (2) Mobile/Phone Number, and (3) Udhaar/Balance (or explicit 0 / zero balance).
+   - If the user DID NOT provide mobile number or udhaar balance (e.g. they only said "Ayushi tester add karo" or "Customer page par jao aur Ayushi tester add karo"):
+     * DO NOT call 'add_customer' or 'manage_customer' yet!
+     * If they asked to navigate as well, execute 'navigate_to', and in your spoken response, ASK the user to provide the missing mobile number and udhaar balance:
+       Example: "Thik hai, mai customers page par ja raha hu. Kripya Ayushi tester ka mobile number aur udhaar balance batayein."
+   - When the user provides the mobile number and balance (either in the same turn or in the subsequent turn):
+     * Call 'add_customer' (or 'manage_customer') with the customer's name, phone, and udhaarBalance.
+     * Confirm to the user: "Customer [Name] successfully add ho gaya hai."
+
+3. ADDING / MANAGING PRODUCTS (MANDATORY FIELDS):
+   - MANDATORY details required to add a product: (1) Product Name, (2) Selling Price, and (3) Stock Quantity.
+   - If the user DID NOT provide selling price or stock quantity (e.g. only said "Parle-G add karo"):
+     * DO NOT call 'add_product' or 'manage_product' yet!
+     * If they asked to navigate, execute 'navigate_to', and in your spoken response, ASK the user for the missing selling price and stock:
+       Example: "Mai inventory page par ja raha hu. Parle-G ka selling price aur stock kitna hai?"
+   - When all details are provided, call 'add_product' with name, sellingPrice, and stock.
+
+4. MANAGING CART & BILLING:
+   - When user asks to add items to cart, call 'manage_cart' with the product name or ID and quantity.
+   - When user asks to create/generate a bill (e.g. "Rahul ka bill banao 2 Coke ka cash me"), add the items to cart, then call 'generate_bill', and navigate to billing or show receipt.
+
+5. NAVIGATION:
+   - When user asks to go to, open, or switch to any page (billing, customers, inventory, purchase, enquiries, reports, settings, ledger, warehouses, assets, import, dashboard), call 'navigate_to'.
+
+6. SPOKEN OUTPUT:
+   - Provide a concise (1-2 sentences), warm, natural Hindi/Hinglish response summarizing what you did and asking for missing details if any.`;
 
       let currentMessages = [...chatHistoryRef.current, { role: 'user', parts: [{ text }] }];
       const ai = new GoogleGenAI({ apiKey });
@@ -177,7 +216,7 @@ export default function VoiceAssistant() {
         functionDeclarations: [
           {
             name: "navigate_to",
-            description: "Navigate to a specific page.",
+            description: "Navigate to a specific page or section.",
             parameters: {
               type: "OBJECT",
               properties: {
@@ -187,8 +226,22 @@ export default function VoiceAssistant() {
             }
           },
           {
+            name: "add_customer",
+            description: "Add a new customer to the database once Name, Phone number, and Udhaar balance are provided.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                name: { type: "STRING", description: "Customer full name" },
+                phone: { type: "STRING", description: "Customer phone number (Required)" },
+                address: { type: "STRING", description: "Customer address (optional)" },
+                udhaarBalance: { type: "NUMBER", description: "Opening balance / debt (Required, 0 if none)" }
+              },
+              required: ["name", "phone", "udhaarBalance"]
+            }
+          },
+          {
             name: "manage_customer",
-            description: "Add, update, or delete a customer.",
+            description: "Add, update, or delete a customer. For 'add', name, phone, and udhaarBalance must be provided.",
             parameters: {
               type: "OBJECT",
               properties: {
@@ -196,14 +249,28 @@ export default function VoiceAssistant() {
                 id: { type: "STRING", description: "Required for update/delete" },
                 name: { type: "STRING" },
                 phone: { type: "STRING" },
+                address: { type: "STRING" },
                 udhaarBalance: { type: "NUMBER" }
               },
               required: ["action"]
             }
           },
           {
+            name: "add_product",
+            description: "Add a new product to inventory once Name, Selling Price, and Stock are provided.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                name: { type: "STRING", description: "Product name" },
+                sellingPrice: { type: "NUMBER", description: "Selling price (Required)" },
+                stock: { type: "NUMBER", description: "Initial stock quantity (Required)" }
+              },
+              required: ["name", "sellingPrice", "stock"]
+            }
+          },
+          {
             name: "manage_product",
-            description: "Add, update, or delete a product.",
+            description: "Add, update, or delete a product. For 'add', name, sellingPrice, and stock must be provided.",
             parameters: {
               type: "OBJECT",
               properties: {
@@ -217,13 +284,25 @@ export default function VoiceAssistant() {
             }
           },
           {
+            name: "add_to_cart",
+            description: "Add an item to the billing cart by product name or product ID.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                product_id: { type: "STRING", description: "Product name or product ID" },
+                qty: { type: "NUMBER", description: "Quantity to add (default 1)" }
+              },
+              required: ["product_id"]
+            }
+          },
+          {
             name: "manage_cart",
             description: "Add, update quantity, remove items, or clear the billing cart.",
             parameters: {
               type: "OBJECT",
               properties: {
                 action: { type: "STRING", description: "'add', 'update', 'remove', 'clear'" },
-                product_id: { type: "STRING", description: "Required unless action is 'clear'" },
+                product_id: { type: "STRING", description: "Product name or product ID" },
                 qty: { type: "NUMBER", description: "Quantity to add or update to" }
               },
               required: ["action"]
@@ -235,11 +314,25 @@ export default function VoiceAssistant() {
             parameters: {
               type: "OBJECT",
               properties: {
-                customerId: { type: "STRING", description: "ID of the customer (optional if cash sale)" },
+                customerId: { type: "STRING", description: "Customer name or customer ID (optional)" },
                 paymentMode: { type: "STRING", description: "'Cash', 'UPI', 'Card', or 'Debt'" },
                 cashPaid: { type: "NUMBER", description: "Amount paid right now (optional)" }
               },
               required: ["paymentMode"]
+            }
+          },
+          {
+            name: "add_enquiry",
+            description: "Add a new customer enquiry or lead.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                name: { type: "STRING", description: "Name of enquirer" },
+                phone: { type: "STRING", description: "Phone number (optional)" },
+                itemOfInterest: { type: "STRING", description: "Product or item of interest (optional)" },
+                notes: { type: "STRING", description: "Notes (optional)" }
+              },
+              required: ["name"]
             }
           },
           {
@@ -251,7 +344,9 @@ export default function VoiceAssistant() {
                   action: { type: "STRING", description: "'add', 'update', 'delete'" },
                   id: { type: "STRING" },
                   name: { type: "STRING" },
-                  itemOfInterest: { type: "STRING" }
+                  phone: { type: "STRING" },
+                  itemOfInterest: { type: "STRING" },
+                  notes: { type: "STRING" }
                },
                required: ["action"]
             }
@@ -282,12 +377,13 @@ export default function VoiceAssistant() {
       let keepProcessing = true;
       let loopCount = 0;
       let finalSpeechText = '';
+      const actionSummaries = [];
 
-      while (keepProcessing && loopCount < 7) {
+      while (keepProcessing && loopCount < 5) {
         loopCount++;
         
         const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: 'gemini-2.5-flash',
           contents: currentMessages,
           config: {
             systemInstruction: systemInstruction,
@@ -300,106 +396,207 @@ export default function VoiceAssistant() {
         const text = response.text || "";
 
         if (functionCalls.length > 0) {
-          // It made tool calls, append model's exact tool call request to history
-          // We MUST use response.candidates[0].content.parts to preserve thought_signature
-          currentMessages.push({
-             role: 'model',
-             parts: response.candidates[0].content.parts
-          });
+          // Record model turn
+          if (response.candidates?.[0]?.content?.parts) {
+            currentMessages.push({
+               role: 'model',
+               parts: response.candidates[0].content.parts
+            });
+          }
 
           // Execute tools locally
-          let functionResponses = [];
+          const functionResponses = [];
           for (const call of functionCalls) {
              let result = { success: true };
              try {
                 if (call.name === 'navigate_to') {
-                   let page = call.args.page.toLowerCase();
+                   let page = (call.args.page || '').toLowerCase().trim();
                    if (page === 'dashboard' || page === 'home') page = '';
                    router.push(`/${page}`);
-                   result.message = `Navigated to ${page || 'home'}`;
+                   result.message = `Navigated to ${page || 'home'} page`;
+                   actionSummaries.push(`mai ${page || 'home'} page par ja raha hu`);
                 }
-                else if (call.name === 'manage_customer') {
-                   if (call.args.action === 'add') {
-                      await addCustomer({ name: call.args.name, phone: call.args.phone || '', udhaarBalance: call.args.udhaarBalance || 0 });
-                      result.message = "Customer added successfully.";
-                   } else if (call.args.action === 'update') {
-                      await updateCustomer({ id: call.args.id, name: call.args.name, phone: call.args.phone, udhaarBalance: call.args.udhaarBalance });
+                else if (call.name === 'manage_customer' || call.name === 'add_customer') {
+                   const action = call.args.action || 'add';
+                   const name = (call.args.name || '').trim();
+                   const phone = (call.args.phone || '').trim();
+                   const address = (call.args.address || '').trim();
+                   const udhaarBalance = Number(call.args.udhaarBalance) || 0;
+
+                   if (action === 'add' || call.name === 'add_customer') {
+                      const custName = name || 'Naya Customer';
+                      await addCustomer({ name: custName, phone, address, type: 'new', membershipTier: 'None', udhaarBalance });
+                      showToast(`Customer "${custName}" added successfully!`, 'success');
+                      result.message = `Customer "${custName}" added successfully.`;
+                      actionSummaries.push(`customer "${custName}" add kar diya`);
+                   } else if (action === 'update') {
+                      await updateCustomer({ id: call.args.id, name, phone, address, udhaarBalance });
+                      showToast('Customer updated!', 'success');
                       result.message = "Customer updated.";
-                   } else if (call.args.action === 'delete') {
+                      actionSummaries.push(`customer update kar diya`);
+                   } else if (action === 'delete') {
                       await deleteCustomer(call.args.id);
+                      showToast('Customer deleted!', 'info');
                       result.message = "Customer deleted.";
+                      actionSummaries.push(`customer delete kar diya`);
                    }
                 }
-                else if (call.name === 'manage_product') {
-                   if (call.args.action === 'add') {
-                      await addProduct({ name: call.args.name, sellingPrice: call.args.sellingPrice || 0, stock: call.args.stock || 0, itemType: 'Product' });
-                      result.message = "Product added.";
-                   } else if (call.args.action === 'update') {
-                      await updateProduct({ id: call.args.id, name: call.args.name, sellingPrice: call.args.sellingPrice, stock: call.args.stock });
+                else if (call.name === 'manage_product' || call.name === 'add_product') {
+                   const action = call.args.action || 'add';
+                   const name = (call.args.name || '').trim();
+                   const sellingPrice = Number(call.args.sellingPrice) || 0;
+                   const stock = Number(call.args.stock) || 0;
+
+                   if (action === 'add' || call.name === 'add_product') {
+                      const prodName = name || 'Naya Product';
+                      await addProduct({
+                         name: prodName,
+                         sellingPrice,
+                         purchasePrice: 0,
+                         stock,
+                         itemType: 'Goods',
+                         category: 'General',
+                         godown: 'main',
+                         gst: 0
+                      });
+                      showToast(`Product "${prodName}" added to inventory!`, 'success');
+                      result.message = `Product "${prodName}" added to inventory.`;
+                      actionSummaries.push(`product "${prodName}" inventory me add kar diya`);
+                   } else if (action === 'update') {
+                      await updateProduct({ id: call.args.id, name, sellingPrice, stock });
+                      showToast('Product updated!', 'success');
                       result.message = "Product updated.";
-                   } else if (call.args.action === 'delete') {
+                      actionSummaries.push(`product update kar diya`);
+                   } else if (action === 'delete') {
                       await deleteProduct(call.args.id);
+                      showToast('Product deleted!', 'info');
                       result.message = "Product deleted.";
+                      actionSummaries.push(`product delete kar diya`);
                    }
                 }
-                else if (call.name === 'manage_cart') {
-                   if (call.args.action === 'clear') {
+                else if (call.name === 'manage_cart' || call.name === 'add_to_cart') {
+                   const action = call.args.action || 'add';
+                   if (action === 'clear') {
                       dispatch({ type: 'CLEAR_CART' });
+                      showToast('Cart cleared', 'info');
                       result.message = "Cart cleared.";
+                      actionSummaries.push(`cart clear kar diya`);
                    } else {
-                      const product = stateRef.current.products.find(p => p.id === String(call.args.product_id));
+                      const searchKey = String(call.args.product_id || call.args.name || '').trim().toLowerCase();
+                      const product = (stateRef.current.products || []).find(p => 
+                        String(p.id).toLowerCase() === searchKey ||
+                        p.name.toLowerCase() === searchKey ||
+                        p.name.toLowerCase().includes(searchKey) ||
+                        searchKey.includes(p.name.toLowerCase())
+                      );
                       if (!product) {
-                         result.success = false; result.message = "Product not found.";
+                         result.success = false;
+                         result.message = `Product "${call.args.product_id || call.args.name}" not found in inventory.`;
+                         showToast(`Product "${call.args.product_id || call.args.name}" not found`, 'error');
+                         actionSummaries.push(`product "${call.args.product_id || call.args.name}" inventory me nahi mila`);
                       } else {
-                         if (call.args.action === 'add') {
-                            const qty = call.args.qty || 1;
+                         const qty = Number(call.args.qty) || 1;
+                         if (action === 'add' || call.name === 'add_to_cart') {
                             for(let i=0; i<qty; i++) dispatch({ type: 'ADD_TO_CART', payload: product });
+                            showToast(`${product.name} (x${qty}) added to cart!`, 'success');
                             result.message = `${qty} of ${product.name} added to cart.`;
-                         } else if (call.args.action === 'remove') {
-                            dispatch({ type: 'REMOVE_FROM_CART', payload: call.args.product_id });
-                            result.message = "Product removed from cart.";
+                            actionSummaries.push(`${product.name} (x${qty}) cart me add kar diya`);
+                         } else if (action === 'remove') {
+                            dispatch({ type: 'REMOVE_FROM_CART', payload: product.id });
+                            showToast(`${product.name} removed from cart`, 'info');
+                            result.message = `${product.name} removed from cart.`;
+                            actionSummaries.push(`${product.name} cart se hata diya`);
                          }
                       }
                    }
                 }
                 else if (call.name === 'generate_bill') {
-                   if (stateRef.current.cart.length === 0) {
-                      result.success = false; result.message = "Cart is empty.";
+                   if (!stateRef.current.cart || stateRef.current.cart.length === 0) {
+                      result.success = false;
+                      result.message = "Cart is empty. Please add items to cart first.";
+                      showToast("Cart is empty", 'error');
                    } else {
-                      const grandTotal = stateRef.current.cart.reduce((sum, item) => sum + (item.sellingPrice * (item.qty||1)), 0);
+                      let customerId = call.args.customerId || null;
+                      if (customerId) {
+                        const custMatch = (stateRef.current.customers || []).find(c => 
+                          String(c.id).toLowerCase() === String(customerId).toLowerCase() ||
+                          c.name.toLowerCase() === String(customerId).toLowerCase() ||
+                          c.name.toLowerCase().includes(String(customerId).toLowerCase())
+                        );
+                        if (custMatch) customerId = custMatch.id;
+                      }
+                      const grandTotal = stateRef.current.cart.reduce((sum, item) => sum + (Number(item.sellingPrice || 0) * (Number(item.qty) || 1)), 0);
                       const sale = {
                          id: Date.now().toString(),
                          date: new Date().toISOString(),
                          items: [...stateRef.current.cart],
-                         customerId: call.args.customerId || null,
+                         customerId,
                          subtotal: grandTotal,
                          gst: 0,
                          discount: 0,
                          freight: 0,
                          billDiscount: { type: 'none', value: 0 },
                          grandTotal,
-                         paymentMode: call.args.paymentMode,
+                         paymentMode: call.args.paymentMode || 'Cash',
                          cashPaid: call.args.cashPaid || (call.args.paymentMode === 'Debt' ? 0 : grandTotal)
                       };
                       await completeSale(sale);
                       setActiveReceiptSale(sale);
+                      showToast(`Bill of ₹${grandTotal} generated successfully!`, 'success');
                       result.message = `Bill generated successfully for ₹${grandTotal}`;
+                      actionSummaries.push(`₹${grandTotal} ka bill generate kar diya`);
                    }
                 }
-                else if (call.name === 'manage_enquiry') {
-                   if (call.args.action === 'add') await addEnquiry({ name: call.args.name, itemOfInterest: call.args.itemOfInterest || '' });
-                   else if (call.args.action === 'update') await updateEnquiry({ id: call.args.id, name: call.args.name, itemOfInterest: call.args.itemOfInterest });
-                   else if (call.args.action === 'delete') await deleteEnquiry(call.args.id);
-                   result.message = `Enquiry ${call.args.action}ed.`;
+                else if (call.name === 'manage_enquiry' || call.name === 'add_enquiry') {
+                   const action = call.args.action || 'add';
+                   const name = (call.args.name || '').trim() || 'Enquiry';
+                   const phone = (call.args.phone || '').trim();
+                   const itemOfInterest = (call.args.itemOfInterest || '').trim();
+                   const notes = (call.args.notes || '').trim();
+
+                   if (action === 'add' || call.name === 'add_enquiry') {
+                      await addEnquiry({ name, phone, itemOfInterest, notes, status: 'Open' });
+                      showToast(`Enquiry for "${name}" added!`, 'success');
+                      result.message = `Enquiry for "${name}" added.`;
+                      actionSummaries.push(`enquiry add kar di`);
+                   } else if (action === 'update') {
+                      await updateEnquiry({ id: call.args.id, name, phone, itemOfInterest, notes });
+                      showToast('Enquiry updated!', 'success');
+                      result.message = "Enquiry updated.";
+                      actionSummaries.push(`enquiry update kar di`);
+                   } else if (action === 'delete') {
+                      await deleteEnquiry(call.args.id);
+                      showToast('Enquiry deleted!', 'info');
+                      result.message = "Enquiry deleted.";
+                      actionSummaries.push(`enquiry delete kar di`);
+                   }
                 }
                 else if (call.name === 'manage_asset') {
-                   if (call.args.action === 'add') await addAsset({ name: call.args.name, value: call.args.value || 0, type: call.args.type || 'Fixed' });
-                   else if (call.args.action === 'update') await updateAsset({ id: call.args.id, name: call.args.name, value: call.args.value });
-                   else if (call.args.action === 'delete') await deleteAsset(call.args.id);
-                   result.message = `Asset ${call.args.action}ed.`;
+                   const action = call.args.action || 'add';
+                   const name = (call.args.name || '').trim() || 'Asset';
+                   const value = Number(call.args.value) || 0;
+                   const type = call.args.type || 'Fixed';
+
+                   if (action === 'add') {
+                      await addAsset({ name, value, type });
+                      showToast(`Asset "${name}" added!`, 'success');
+                      result.message = `Asset "${name}" added.`;
+                      actionSummaries.push(`asset add kar diya`);
+                   } else if (action === 'update') {
+                      await updateAsset({ id: call.args.id, name, value, type });
+                      showToast('Asset updated!', 'success');
+                      result.message = "Asset updated.";
+                      actionSummaries.push(`asset update kar diya`);
+                   } else if (action === 'delete') {
+                      await deleteAsset(call.args.id);
+                      showToast('Asset deleted!', 'info');
+                      result.message = "Asset deleted.";
+                      actionSummaries.push(`asset delete kar diya`);
+                   }
                 }
                 else if (call.name === 'get_sales_summary') {
                    result.message = `Today's sales: ₹${todaysSales}`;
+                   actionSummaries.push(`aaj ki total sale ₹${todaysSales} hai`);
                 }
                 else {
                    result.success = false; result.message = "Tool not implemented.";
@@ -414,24 +611,30 @@ export default function VoiceAssistant() {
              });
           }
 
-          // Feed function results back to Gemini
-          currentMessages.push({ role: 'user', parts: functionResponses });
+          // Feed function results back to Gemini with proper 'tool' role
+          currentMessages.push({ role: 'tool', parts: functionResponses });
           
-          if (text) finalSpeechText += text + " "; // Accumulate text if it spoke while calling tools
+          if (text) {
+             finalSpeechText = text;
+          }
           
         } else {
           // No more tool calls, it just provided a text response
-          if (text) finalSpeechText += text;
+          if (text) finalSpeechText = text;
           currentMessages.push({ role: 'model', parts: [{ text }] });
           keepProcessing = false;
         }
       }
 
       if (!finalSpeechText.trim()) {
-         finalSpeechText = "Thik hai, maine kar diya.";
+         if (actionSummaries.length > 0) {
+            finalSpeechText = "Thik hai, " + actionSummaries.join(" aur ") + ".";
+         } else {
+            finalSpeechText = "Thik hai, maine kar diya.";
+         }
       }
 
-      speakText(finalSpeechText);
+      speakText(finalSpeechText.trim());
       chatHistoryRef.current = currentMessages;
       if (chatHistoryRef.current.length > 20) {
           chatHistoryRef.current = chatHistoryRef.current.slice(chatHistoryRef.current.length - 20);
@@ -450,6 +653,22 @@ export default function VoiceAssistant() {
   const speakText = async (text) => {
     setAiText(text);
     setIsSpeaking(true);
+    isSpeakingRef.current = true;
+
+    // CRITICAL: Stop speech recognition while AI is speaking
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch(e) {}
+    }
+    setIsListening(false);
+
+    // Cancel any ongoing browser/cloud audio
+    if (currentAudioRef.current) {
+      try { currentAudioRef.current.pause(); } catch(e) {}
+      currentAudioRef.current = null;
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
 
     try {
       // 1. Try Premium Google Cloud TTS (like Katha app)
@@ -468,20 +687,19 @@ export default function VoiceAssistant() {
       const data = await response.json();
       
       const audio = new Audio("data:audio/mp3;base64," + data.audioContent);
+      currentAudioRef.current = audio;
       
       audio.onended = () => {
         setIsSpeaking(false);
+        isSpeakingRef.current = false;
+        currentAudioRef.current = null;
         resumeListening();
       };
       
       audio.onerror = () => {
-         fallbackBrowserTTS(text);
+        currentAudioRef.current = null;
+        fallbackBrowserTTS(text);
       };
-
-      // Cancel old browser TTS if any was running
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
 
       await audio.play();
     } catch (err) {
@@ -491,7 +709,8 @@ export default function VoiceAssistant() {
   };
 
   const resumeListening = () => {
-    if (isConversationActiveRef.current && recognitionRef.current) {
+    // Only resume if user still has conversation active and AI is NOT speaking
+    if (!isSpeakingRef.current && isConversationActiveRef.current && recognitionRef.current) {
       try {
         setTranscript('');
         finalTranscriptRef.current = '';
@@ -506,6 +725,7 @@ export default function VoiceAssistant() {
       window.speechSynthesis.cancel();
       
       setIsSpeaking(true);
+      isSpeakingRef.current = true;
       const utterance = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
       let targetVoice = 
@@ -521,11 +741,13 @@ export default function VoiceAssistant() {
       
       utterance.onend = () => {
         setIsSpeaking(false);
+        isSpeakingRef.current = false;
         resumeListening();
       };
       utterance.onerror = (e) => {
         console.error("TTS Error", e);
         setIsSpeaking(false);
+        isSpeakingRef.current = false;
         resumeListening();
       };
       
@@ -534,6 +756,7 @@ export default function VoiceAssistant() {
       }, 50);
     } else {
       setIsSpeaking(false);
+      isSpeakingRef.current = false;
       resumeListening();
     }
   };
@@ -587,12 +810,12 @@ export default function VoiceAssistant() {
       <div className="va-container">
         {(isConversationActive || isProcessing || isSpeaking || transcript) && (
           <div className="va-tooltip">
-            {isListening && <span className="va-status-text pulse" style={{color: '#3b82f6'}}><Mic size={16}/> Sun raha hu...</span>}
+            {isListening && !isSpeaking && <span className="va-status-text pulse" style={{color: '#3b82f6'}}><Mic size={16}/> Sun raha hu...</span>}
             {isProcessing && <span className="va-status-text" style={{color: '#f59e0b'}}><Loader2 className="spin" size={16}/> Samajh raha hu...</span>}
             {isSpeaking && <span className="va-status-text" style={{color: '#10b981'}}><Volume2 size={16}/> Bol raha hu...</span>}
             
             {/* Show what user said */}
-            {!isListening && !isProcessing && transcript && (
+            {!isListening && !isProcessing && transcript && !isSpeaking && (
               <div className="va-transcript">
                   👤 "{transcript}"
               </div>
@@ -608,12 +831,14 @@ export default function VoiceAssistant() {
         )}
 
           <button 
-            className="va-btn" 
+            className={`va-btn ${isSpeaking ? '' : (isConversationActive ? 'pulse-anim' : '')}`}
             onClick={toggleListen}
-            style={{ backgroundColor: isConversationActive ? '#ef4444' : '#3b82f6' }}
-            title={isConversationActive ? "Stop Voice Assistant" : "Start Voice Assistant"}
+            style={{ 
+              backgroundColor: isSpeaking ? '#10b981' : (isConversationActive ? '#ef4444' : '#4f46e5') 
+            }}
+            title={isSpeaking ? "AI bol raha hai" : (isConversationActive ? "Stop Voice Assistant" : "Start Voice Assistant")}
           >
-            {isConversationActive ? <MicOff size={24} /> : <Mic size={24} />}
+            {isSpeaking ? <Volume2 size={24} /> : (isConversationActive ? <MicOff size={24} /> : <Mic size={24} />)}
           </button>
         </div>
       {activeReceiptSale && <Receipt sale={activeReceiptSale} onClose={() => setActiveReceiptSale(null)} />}
