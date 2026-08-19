@@ -194,18 +194,25 @@ export default function VoiceAssistant() {
       const overallRevenue = allSales.reduce((total, sale) => total + sale.grandTotal, 0);
       const overallBillsCount = allSales.length;
 
-      const systemInstruction = `You are an intelligent, proactive voice assistant for Cosmo Store billing and retail management software.
-You speak in friendly, natural Hindi / Hinglish (or English).
-You have FULL CAPABILITY to execute multiple tools and multi-step conversational workflows. If the user asks for anything (like today's sale, overall revenue, number of bills, etc), answer them immediately from this summary:
+      const allProducts = stateRef.current.products || [];
+      const lowStockProducts = allProducts.filter(p => Number(p.stock) < 5);
+      const allCustomers = stateRef.current.customers || [];
+      const pendingUdhaarCustomers = allCustomers.filter(c => Number(c.udhaarBalance) > 0);
 
-CURRENT APP STATE SUMMARY:
-- Today's Revenue: ₹${todaysSales}
-- Today's Bills Count: ${todaysBillsCount} bills
-- Overall Total Revenue: ₹${overallRevenue}
-- Overall Total Bills Count: ${overallBillsCount} bills
-- Products in Inventory: ${(stateRef.current.products || []).map(p => `[ID: ${p.id}] ${p.name} - ₹${p.sellingPrice} (Stock: ${p.stock || 0})`).join(', ') || 'No products yet'}
-- Existing Customers: ${(stateRef.current.customers || []).map(c => `[ID: ${c.id}] ${c.name}${c.phone ? ` (${c.phone})` : ''} - Udhaar: ₹${c.udhaarBalance || 0}`).join(', ') || 'No customers yet'}
-- Cart Items: ${(stateRef.current.cart || []).map(i => `${i.name} (x${i.qty || 1})`).join(', ') || 'Empty'}
+      const systemInstruction = `You are a highly intelligent, autonomous, "Jarvis-like" AI assistant for Cosmo Store billing and retail management software. 
+You speak in friendly, natural Hindi / Hinglish.
+You have FULL CAPABILITY to execute multiple tools, analyze data, and perform multi-step workflows automatically.
+You must act proactive. If a user asks a question, answer it smartly using the data below. If they ask you to do a task, execute the tools, and if any information is missing, ASK them for it!
+
+CURRENT BUSINESS SNAPSHOT (LIVE DATA):
+- Today's Revenue: ₹${todaysSales} | Today's Bills: ${todaysBillsCount}
+- Overall Total Revenue: ₹${overallRevenue} | Total Bills: ${overallBillsCount}
+- Low Stock Products (Stock < 5): ${lowStockProducts.length > 0 ? lowStockProducts.map(p => `${p.name} (Stock: ${p.stock})`).join(', ') : 'None, all good!'}
+- Customers with Pending Udhaar (Debt): ${pendingUdhaarCustomers.length > 0 ? pendingUdhaarCustomers.map(c => `${c.name} (Owes: ₹${c.udhaarBalance})`).join(', ') : 'No pending udhaar!'}
+
+Full Inventory Data: ${allProducts.map(p => `[ID: ${p.id}] ${p.name} - ₹${p.sellingPrice} (Stock: ${p.stock || 0})`).join(', ') || 'No products yet'}
+Full Customer Data: ${allCustomers.map(c => `[ID: ${c.id}] ${c.name}${c.phone ? ` (${c.phone})` : ''} - Udhaar: ₹${c.udhaarBalance || 0}`).join(', ') || 'No customers yet'}
+Active Cart Items: ${(stateRef.current.cart || []).map(i => `${i.name} (x${i.qty || 1})`).join(', ') || 'Empty'}
 
 CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
 1. COMPOUND COMMANDS (NAVIGATION + ACTIONS):
