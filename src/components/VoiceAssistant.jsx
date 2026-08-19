@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Loader2, Volume2 } from 'lucide-react';
+import { Mic, MicOff, Loader2, Volume2, X } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { useApp } from '../store/AppContext';
 import { useRouter } from 'next/navigation';
@@ -144,6 +144,30 @@ export default function VoiceAssistant() {
     }
   };
 
+  const cancelListening = () => {
+    setIsConversationActive(false);
+    isConversationActiveRef.current = false;
+    setIsSpeaking(false);
+    isSpeakingRef.current = false;
+    clearTimeout(silenceTimerRef.current);
+    try { recognitionRef.current.stop(); } catch(e) {}
+    setIsListening(false);
+
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    
+    setTranscript('');
+    setAiText('');
+    finalTranscriptRef.current = '';
+    currentTranscriptRef.current = '';
+    setIsProcessing(false);
+  };
+
   const processVoiceCommand = async (text) => {
     if (!text.trim()) return;
     setIsProcessing(true);
@@ -157,20 +181,28 @@ export default function VoiceAssistant() {
       }
 
       const now = new Date();
-      const todaysSales = (stateRef.current.sales || [])
-        .filter(s => {
-            if (!s.date) return false;
-            const d = new Date(s.date);
-            return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-        })
-        .reduce((total, sale) => total + sale.grandTotal, 0);
+      const allSales = stateRef.current.sales || [];
+      const todaysSalesArr = allSales.filter(s => {
+          if (!s.date) return false;
+          const d = new Date(s.date);
+          return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      });
+      
+      const todaysSales = todaysSalesArr.reduce((total, sale) => total + sale.grandTotal, 0);
+      const todaysBillsCount = todaysSalesArr.length;
+      
+      const overallRevenue = allSales.reduce((total, sale) => total + sale.grandTotal, 0);
+      const overallBillsCount = allSales.length;
 
       const systemInstruction = `You are an intelligent, proactive voice assistant for Cosmo Store billing and retail management software.
 You speak in friendly, natural Hindi / Hinglish (or English).
-You have FULL CAPABILITY to execute multiple tools and multi-step conversational workflows.
+You have FULL CAPABILITY to execute multiple tools and multi-step conversational workflows. If the user asks for anything (like today's sale, overall revenue, number of bills, etc), answer them immediately from this summary:
 
 CURRENT APP STATE SUMMARY:
-- Total Sales Today: ₹${todaysSales}
+- Today's Revenue: ₹${todaysSales}
+- Today's Bills Count: ${todaysBillsCount} bills
+- Overall Total Revenue: ₹${overallRevenue}
+- Overall Total Bills Count: ${overallBillsCount} bills
 - Products in Inventory: ${(stateRef.current.products || []).map(p => `[ID: ${p.id}] ${p.name} - ₹${p.sellingPrice} (Stock: ${p.stock || 0})`).join(', ') || 'No products yet'}
 - Existing Customers: ${(stateRef.current.customers || []).map(c => `[ID: ${c.id}] ${c.name}${c.phone ? ` (${c.phone})` : ''} - Udhaar: ₹${c.udhaarBalance || 0}`).join(', ') || 'No customers yet'}
 - Cart Items: ${(stateRef.current.cart || []).map(i => `${i.name} (x${i.qty || 1})`).join(', ') || 'Empty'}
@@ -193,11 +225,12 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
 
 3. ADDING / MANAGING PRODUCTS (MANDATORY FIELDS):
    - MANDATORY details required to add a product: (1) Product Name, (2) Selling Price, and (3) Stock Quantity.
+   - User can OPTIONALLY provide: barcode, purchase price, and GST rate. If provided, accept them!
    - If the user DID NOT provide selling price or stock quantity (e.g. only said "Parle-G add karo"):
      * DO NOT call 'add_product' or 'manage_product' yet!
      * If they asked to navigate, execute 'navigate_to', and in your spoken response, ASK the user for the missing selling price and stock:
        Example: "Mai inventory page par ja raha hu. Parle-G ka selling price aur stock kitna hai?"
-   - When all details are provided, call 'add_product' with name, sellingPrice, and stock.
+   - When all mandatory details are provided, call 'add_product' with name, sellingPrice, stock, and any optional fields like barcode or gst.
 
 4. MANAGING CART & BILLING:
    - When user asks to add items to cart, call 'manage_cart' with the product name or ID and quantity.
@@ -257,13 +290,16 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
           },
           {
             name: "add_product",
-            description: "Add a new product to inventory once Name, Selling Price, and Stock are provided.",
+            description: "Add a new product to inventory once Name, Selling Price, and Stock are provided. Optional: barcode, purchase price, gst.",
             parameters: {
               type: "OBJECT",
               properties: {
                 name: { type: "STRING", description: "Product name" },
                 sellingPrice: { type: "NUMBER", description: "Selling price (Required)" },
-                stock: { type: "NUMBER", description: "Initial stock quantity (Required)" }
+                stock: { type: "NUMBER", description: "Initial stock quantity (Required)" },
+                purchasePrice: { type: "NUMBER", description: "Purchase price" },
+                gst: { type: "NUMBER", description: "GST rate" },
+                barcode: { type: "STRING", description: "Barcode" }
               },
               required: ["name", "sellingPrice", "stock"]
             }
@@ -278,7 +314,10 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                 id: { type: "STRING" },
                 name: { type: "STRING" },
                 sellingPrice: { type: "NUMBER" },
-                stock: { type: "NUMBER" }
+                stock: { type: "NUMBER" },
+                purchasePrice: { type: "NUMBER" },
+                gst: { type: "NUMBER" },
+                barcode: { type: "STRING" }
               },
               required: ["action"]
             }
@@ -446,24 +485,28 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                    const name = (call.args.name || '').trim();
                    const sellingPrice = Number(call.args.sellingPrice) || 0;
                    const stock = Number(call.args.stock) || 0;
+                   const purchasePrice = Number(call.args.purchasePrice) || 0;
+                   const gst = Number(call.args.gst) || 0;
+                   const barcode = (call.args.barcode || '').trim();
 
                    if (action === 'add' || call.name === 'add_product') {
                       const prodName = name || 'Naya Product';
                       await addProduct({
                          name: prodName,
                          sellingPrice,
-                         purchasePrice: 0,
+                         purchasePrice,
                          stock,
+                         barcode,
                          itemType: 'Goods',
                          category: 'General',
                          godown: 'main',
-                         gst: 0
+                         gst
                       });
                       showToast(`Product "${prodName}" added to inventory!`, 'success');
                       result.message = `Product "${prodName}" added to inventory.`;
                       actionSummaries.push(`product "${prodName}" inventory me add kar diya`);
                    } else if (action === 'update') {
-                      await updateProduct({ id: call.args.id, name, sellingPrice, stock });
+                      await updateProduct({ id: call.args.id, name, sellingPrice, stock, purchasePrice, gst, barcode });
                       showToast('Product updated!', 'success');
                       result.message = "Product updated.";
                       actionSummaries.push(`product update kar diya`);
@@ -595,8 +638,8 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                    }
                 }
                 else if (call.name === 'get_sales_summary') {
-                   result.message = `Today's sales: ₹${todaysSales}`;
-                   actionSummaries.push(`aaj ki total sale ₹${todaysSales} hai`);
+                   result.message = `Today's sales: ₹${todaysSales} (${todaysBillsCount} bills). Overall Revenue: ₹${overallRevenue} (${overallBillsCount} bills).`;
+                   actionSummaries.push(`aaj ki total sale ₹${todaysSales} hai (${todaysBillsCount} bills)`);
                 }
                 else {
                    result.success = false; result.message = "Tool not implemented.";
@@ -825,6 +868,18 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
             {aiText && (
                <div className="va-transcript" style={{ color: '#0f172a', fontStyle: 'normal', fontWeight: '600', marginTop: '12px' }}>
                   🤖 {aiText}
+               </div>
+            )}
+            
+            {/* Cancel Button */}
+            {(isListening || isProcessing || isSpeaking) && (
+               <div style={{ marginTop: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '8px', display: 'flex', justifyContent: 'center' }}>
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); cancelListening(); }} 
+                   style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                 >
+                   <X size={14} /> Cancel Request
+                 </button>
                </div>
             )}
           </div>
