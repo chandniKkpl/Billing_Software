@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useApp } from '../store/AppContext';
 import Receipt from '../components/Receipt';
 import SalesReport from '../components/reports/SalesReport';
@@ -52,6 +53,16 @@ export default function Reports() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [selectedSale, setSelectedSale] = useState(null);
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams) {
+      const tabParam = searchParams.get('tab');
+      if (tabParam && ['Sales', 'Purchases', 'Trial', 'Balance'].includes(tabParam)) {
+        setReportTab(tabParam);
+      }
+    }
+  }, [searchParams]);
 
   const { from, to } = getDateRange(period, customFrom, customTo);
 

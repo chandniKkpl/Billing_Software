@@ -122,7 +122,7 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
       
       editedItems.forEach(c => {
         const qty = Number(c.qty) || 0;
-        const price = Number(c.sellingPrice) || 0;
+        const price = sale.vendorId ? (Number(c.purchasePrice) || 0) : (Number(c.sellingPrice) || 0);
         const itemGstPct = Number(c.gst) || 0;
         subtotal += price * qty;
         gst += (price * qty) * (itemGstPct / 100);
@@ -164,7 +164,7 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
   let previewGst = 0;
   currentItems.forEach(c => {
     const qty = Number(c.qty) || 0;
-    const price = Number(c.sellingPrice) || 0;
+    const price = sale.vendorId ? (Number(c.purchasePrice) || 0) : (Number(c.sellingPrice) || 0);
     const itemGstPct = Number(c.gst) || 0;
     previewSubtotal += price * qty;
     previewGst += (price * qty) * (itemGstPct / 100);
@@ -206,13 +206,14 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
           <div className="receipt-divider"></div>
           
           {/* Bill Info */}
-          <div className="receipt-row" style={{ fontSize: '12px' }}>
-            <span><strong>Bill: #{sale.billNo ? String(sale.billNo).padStart(4, '0') : sale.id.slice(-6).toUpperCase()}</strong></span>
+          <div className="receipt-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid #ccc', paddingBottom: '4px' }}>
+            <span><strong>{sale.vendorId ? 'Purchase' : 'Bill'}: #{sale.billNo ? String(sale.billNo).padStart(4, '0') : sale.id.slice(-6).toUpperCase()}</strong></span>
             <span>{new Date(sale.date).toLocaleDateString()}</span>
           </div>
           <div style={{ fontSize: '12px' }}>Time: {new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
           <div style={{ fontSize: '12px' }}>Mode: {sale.paymentMode}</div>
           {sale.bankInfo && <div style={{ fontSize: '12px' }}>Ref/Bank: {sale.bankInfo}</div>}
+          {sale.vendorBillNo && <div style={{ fontSize: '12px' }}>Vendor Bill No: {sale.vendorBillNo}</div>}
           
           {(() => {
             const customer = (sale.customerId ? state.customers?.find(c => String(c.id) === String(sale.customerId)) : null)
@@ -262,7 +263,7 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
             <tbody>
               {currentItems.map((item, i) => {
                 const mrp = Number(item.mrp) || 0;
-                const rate = Number(item.sellingPrice);
+                const rate = sale.vendorId ? (Number(item.purchasePrice) || 0) : Number(item.sellingPrice);
                 const explicitDisc = item.discount || 0;
                 // Auto-calculate discount% from MRP if no explicit discount set
                 const mrpDiscPct = (mrp > rate && mrp > 0) ? ((mrp - rate) / mrp * 100) : 0;
@@ -283,7 +284,7 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
                         <input 
                           type="number" 
                           step="any"
-                          value={item.sellingPrice} 
+                          value={sale.vendorId ? item.purchasePrice : item.sellingPrice} 
                           onChange={e => handlePriceChange(i, Number(e.target.value))}
                           style={{ width: '55px', fontSize: '11px', textAlign: 'right', border: '1px solid #ccc', background: '#f9f9f9', padding: '1px' }}
                         />
@@ -379,8 +380,12 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
             </>
           ) : (
             <>
-              <button className="btn btn-danger" onClick={handleDeleteBill} title="Delete Bill completely">🗑️ Delete</button>
-              <button className="btn btn-ghost" onClick={handleEditBill} title="Add or Remove Products">🛒 Edit Cart</button>
+              { !sale.vendorId && (
+                <>
+                  <button className="btn btn-danger" onClick={handleDeleteBill} title="Delete Bill completely">🗑️ Delete</button>
+                  <button className="btn btn-ghost" onClick={handleEditBill} title="Add or Remove Products">🛒 Edit Cart</button>
+                </>
+              )}
               <button className="btn btn-ghost" onClick={onClose}>Close</button>
               <button className="btn btn-primary" onClick={handlePrint}>🖨️ Print</button>
             </>
