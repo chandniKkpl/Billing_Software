@@ -13,14 +13,35 @@ export default function ClientProviders({ children }) {
 
   useEffect(() => {
     setMounted(true);
-    if (sessionStorage.getItem('cs_auth_session')) {
+    const session = localStorage.getItem('cs_auth_session') || sessionStorage.getItem('cs_auth_session');
+    if (session) {
       setIsAuthenticated(true);
+    }
+
+    // Register Service Worker for offline PWA support
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+      const registerSW = () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then((registration) => {
+            console.log('ServiceWorker registration successful with scope: ', registration.scope);
+          })
+          .catch((err) => {
+            console.warn('ServiceWorker registration failed: ', err);
+          });
+      };
+
+      if (document.readyState === 'complete') {
+        registerSW();
+      } else {
+        window.addEventListener('load', registerSW);
+      }
     }
   }, []);
 
   const handleLogin = () => {
     setIsAuthenticated(true);
     sessionStorage.setItem('cs_auth_session', 'true');
+    localStorage.setItem('cs_auth_session', 'true');
   };
 
   if (!mounted) return null; // Prevent hydration mismatch
