@@ -259,6 +259,7 @@ export default function VoiceAssistant() {
       const allCustomers = stateRef.current.customers || [];
       const pendingUdhaarCustomers = allCustomers.filter(c => Number(c.udhaarBalance) > 0);
       const allWarehouses = stateRef.current.warehouses || [];
+      const allAssets = stateRef.current.assets || [];
 
       const systemInstruction = `You are a highly intelligent, autonomous, "Jarvis-like" AI assistant for Cosmo Store billing and retail management software. 
 You speak in friendly, natural Hindi / Hinglish.
@@ -275,7 +276,9 @@ CURRENT BUSINESS SNAPSHOT (LIVE DATA):
 
 Full Inventory Data: ${allProducts.map(p => `[ID: ${p.id}] ${p.name} - ₹${p.sellingPrice} (Stock: ${p.stock || 0})`).join(', ') || 'No products yet'}
 Full Customer Data: ${allCustomers.map(c => `[ID: ${c.id}] ${c.name}${c.phone ? ` (${c.phone})` : ''} - Udhaar: ₹${c.udhaarBalance || 0}`).join(', ') || 'No customers yet'}
+Full Vendor Data: ${stateRef.current.vendors ? stateRef.current.vendors.map(v => `[ID: ${v.id}] ${v.name} - Balance: ₹${v.balance || 0}`).join(', ') : 'No vendors yet'}
 Full Warehouses Data: ${allWarehouses.map(w => `[ID: ${w.id}] ${w.name}`).join(', ') || 'No warehouses'}
+Full Assets Data: ${allAssets.map(a => `[ID: ${a.id}] ${a.name} - ₹${a.value} (${a.type})`).join(', ') || 'No assets yet'}
 Active Cart Items: ${(stateRef.current.cart || []).map(i => `${i.name} (x${i.qty || 1})`).join(', ') || 'Empty'}
 
 CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
@@ -339,7 +342,7 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
             parameters: {
               type: "OBJECT",
               properties: {
-                page: { type: "STRING", description: "e.g., 'billing', 'purchase', 'customers', 'inventory', 'warehouses', 'reports', 'settings', 'dashboard', 'enquiries', 'ledger', 'assets', 'import'" }
+                page: { type: "STRING", description: "e.g., 'billing', 'purchase', 'customers', 'inventory', 'warehouses', 'reports', 'settings', 'dashboard', 'enquiries', 'ledger', 'assets', 'import'. If a specific tab is requested, combine them e.g. 'ledger employee', 'ledger customer', 'reports sales', 'reports trial balance'." }
               },
               required: ["page"]
             }
@@ -372,6 +375,36 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                 udhaarBalance: { type: "NUMBER" }
               },
               required: ["action"]
+            }
+          },
+          {
+            name: "manage_vendor",
+            description: "Add, update, or delete a vendor/supplier.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                action: { type: "STRING", description: "'add', 'update', or 'delete'" },
+                id: { type: "STRING", description: "Required for update/delete" },
+                name: { type: "STRING", description: "Vendor name (Required for add)" },
+                phone: { type: "STRING" },
+                balance: { type: "NUMBER", description: "Opening balance" }
+              },
+              required: ["action"]
+            }
+          },
+          {
+            name: "manage_account",
+            description: "Add, update, or delete a ledger account (Employee, Cash, Bank, Income, Expenditure).",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                action: { type: "STRING", description: "'add', 'update', or 'delete'" },
+                id: { type: "STRING" },
+                name: { type: "STRING", description: "Name of the account (e.g. Rahul, SBI Bank)" },
+                type: { type: "STRING", description: "'Employee', 'Cash', 'Bank', 'Income', or 'Expenditure'" },
+                balance: { type: "NUMBER", description: "Opening balance" }
+              },
+              required: ["action", "name", "type"]
             }
           },
           {
@@ -506,18 +539,19 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                 type: "OBJECT",
                 properties: {
                    entityName: { type: "STRING", description: "Name of customer/vendor/employee" },
+                   entityType: { type: "STRING", description: "'Customer', 'Vendor', or 'Employee'" },
                    amount: { type: "NUMBER", description: "Amount in transaction" },
-                   type: { type: "STRING", description: "'Leni' (Payment In) or 'Deni' (Payment Out)" },
+                   type: { type: "STRING", description: "'Leni' (Payment In, Receive) or 'Deni' (Payment Out, Spend)" },
                    date: { type: "STRING", description: "Date of transaction (optional)" },
                    paymentMode: { type: "STRING", description: "'Cash', 'Bank', 'UPI', 'Cheque' (optional)" },
                    notes: { type: "STRING", description: "Notes (optional)" }
                 },
-                required: ["entityName", "amount", "type"]
+                required: ["entityName", "entityType", "amount", "type"]
              }
           },
           {
              name: "manage_asset",
-             description: "Add, update, or delete an asset.",
+             description: "Add, update, or delete an asset. For updates/deletes, provide 'name' or 'id' to identify the asset.",
              parameters: {
                 type: "OBJECT",
                 properties: {
@@ -525,7 +559,8 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                    id: { type: "STRING" },
                    name: { type: "STRING" },
                    value: { type: "NUMBER" },
-                   type: { type: "STRING", description: "'Fixed' or 'Current'" }
+                   type: { type: "STRING", description: "'Fixed' or 'Current'" },
+                   dateAcquired: { type: "STRING", description: "Date acquired, e.g. '2026-07-10' (optional)" }
                 },
                 required: ["action"]
              }
@@ -625,17 +660,26 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                    let page = (call.args.page || '').toLowerCase().trim();
                    let targetPage = `/${page}`;
                    if (page === 'dashboard' || page === 'home') targetPage = '/';
+                   else if (page.includes('ledger') || page.includes('khata')) {
+                      if (page.includes('employee')) targetPage = '/ledger?tab=Employee';
+                      else if (page.includes('vendor')) targetPage = '/ledger?tab=Vendor';
+                      else if (page.includes('customer')) targetPage = '/ledger?tab=Customer';
+                      else if (page.includes('cash')) targetPage = '/ledger?tab=Cash';
+                      else if (page.includes('bank')) targetPage = '/ledger?tab=Bank';
+                      else if (page.includes('income')) targetPage = '/ledger?tab=Income';
+                      else if (page.includes('expenditure') || page.includes('expense')) targetPage = '/ledger?tab=Expenditure';
+                      else targetPage = '/ledger';
+                   }
                    else if (page.includes('purchase report') || page.includes('purchases report')) targetPage = '/reports?tab=Purchases';
                    else if (page.includes('sales report') || page.includes('profit')) targetPage = '/reports?tab=Sales';
+                   else if (page.includes('trial')) targetPage = '/reports?tab=Trial';
+                   else if (page.includes('balance')) targetPage = '/reports?tab=Balance';
+                   else if (page.includes('report')) targetPage = '/reports';
                    else if (page.includes('purchase')) targetPage = '/purchase';
                    else if (page.includes('bill')) targetPage = '/billing';
                    else if (page.includes('inventory')) targetPage = '/inventory';
                    else if (page.includes('customer')) targetPage = '/customers';
-                   else if (page.includes('trial')) targetPage = '/reports?tab=Trial';
-                   else if (page.includes('balance')) targetPage = '/reports?tab=Balance';
-                   else if (page.includes('report')) targetPage = '/reports';
                    else if (page.includes('enquir')) targetPage = '/enquiries';
-                   else if (page.includes('ledger')) targetPage = '/ledger';
                    router.push(targetPage);
                    result.message = `Navigated to ${page || 'home'} page`;
                    actionSummaries.push(`mai ${page || 'home'} page par ja raha hu`);
@@ -685,6 +729,50 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                       result.message = `Customer not found for ${action}. Ask user to provide exact mobile number or full name.`;
                    }
                 }
+                else if (call.name === 'manage_vendor') {
+                   const action = call.args.action || 'add';
+                   const name = (call.args.name || '').trim();
+                   const phone = (call.args.phone || '').trim();
+                   const balance = Number(call.args.balance) || 0;
+
+                   let targetId = call.args.id;
+                   if (!targetId && name && action !== 'add') {
+                     const match = (stateRef.current.vendors || []).find(v => v.name.toLowerCase() === name.toLowerCase());
+                     if (match) targetId = match.id;
+                   }
+
+                   if (action === 'add') {
+                      const vendorName = name || 'Naya Vendor';
+                      await addVendor({ name: vendorName, phone, balance, interestRate: 0, balanceType: 'Take' });
+                      showToast(`Vendor "${vendorName}" added!`, 'success');
+                      result.message = `Vendor "${vendorName}" added successfully.`;
+                      actionSummaries.push(`vendor "${vendorName}" add kar diya`);
+                   } else if (action === 'update' && targetId) {
+                      const exists = (stateRef.current.vendors || []).find(v => String(v.id) === String(targetId));
+                      if (!exists) {
+                         result.success = false;
+                         result.message = `Vendor not found for update.`;
+                      } else {
+                         const updateData = { id: targetId };
+                         if (call.args.name) updateData.name = call.args.name.trim();
+                         if (call.args.phone) updateData.phone = call.args.phone.trim();
+                         if (call.args.balance !== undefined) updateData.balance = Number(call.args.balance);
+                         
+                         await updateVendor(updateData);
+                         showToast('Vendor updated!', 'success');
+                         result.message = "Vendor updated.";
+                         actionSummaries.push(`vendor update kar diya`);
+                      }
+                   } else if (action === 'delete' && targetId) {
+                      await deleteVendor(targetId);
+                      showToast('Vendor deleted!', 'info');
+                      result.message = "Vendor deleted.";
+                      actionSummaries.push(`vendor delete kar diya`);
+                   } else {
+                      result.success = false;
+                      result.message = `Vendor not found for ${action}.`;
+                   }
+                 }
                 else if (call.name === 'manage_product' || call.name === 'add_product') {
                    const action = call.args.action || 'add';
                    const name = (call.args.name || '').trim();
@@ -959,35 +1047,97 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                       result.success = false;
                       result.message = `Enquiry not found for ${action}. Ask user to provide exact enquiry name.`;
                    }
-                }
-                else if (call.name === 'add_ledger_transaction') {
+                 }
+                 else if (call.name === 'manage_account') {
+                   const action = call.args.action || 'add';
+                   const name = (call.args.name || '').trim();
+                   const type = call.args.type || 'Employee';
+                   const balance = Number(call.args.balance) || 0;
+
+                   let targetId = call.args.id;
+                   if (!targetId && name && action !== 'add') {
+                     const match = (stateRef.current.accounts || []).find(a => a.name.toLowerCase() === name.toLowerCase());
+                     if (match) targetId = match.id;
+                   }
+
+                   if (action === 'add') {
+                      await addAccount({ name, type, balance });
+                      showToast(`${type} account "${name}" added successfully!`, 'success');
+                      result.message = `${type} account "${name}" added successfully.`;
+                      actionSummaries.push(`${type} "${name}" add kar diya`);
+                   } else if (action === 'update' && targetId) {
+                      await updateAccount({ id: targetId, name, type, balance });
+                      showToast(`${type} account updated!`, 'success');
+                      result.message = "Account updated.";
+                      actionSummaries.push(`account update kar diya`);
+                   } else if (action === 'delete' && targetId) {
+                      await deleteAccount(targetId);
+                      showToast('Account deleted!', 'info');
+                      result.message = "Account deleted.";
+                      actionSummaries.push(`account delete kar diya`);
+                   } else {
+                      result.success = false;
+                      result.message = `Account not found for ${action}.`;
+                   }
+                 }
+                 else if (call.name === 'add_ledger_transaction') {
                    const entityName = (call.args.entityName || '').trim();
+                   const entityType = call.args.entityType || 'Customer';
                    const amount = Number(call.args.amount) || 0;
-                   const type = (call.args.type || '').toLowerCase().includes('deni') || (call.args.type || '').toLowerCase().includes('out') ? 'Payment Out' : 'Payment In';
+                   const type = (call.args.type || '').toLowerCase().includes('deni') || (call.args.type || '').toLowerCase().includes('out') || (call.args.type || '').toLowerCase().includes('spend') ? 'Payment' : 'Receive';
                    const date = call.args.date ? new Date(call.args.date).toISOString() : new Date().toISOString();
                    const paymentMode = call.args.paymentMode || 'Cash';
                    const notes = call.args.notes || '';
                    
-                   await addLedgerTransaction({
-                      entityId: entityName.toLowerCase(), // In real app, might resolve to exact ID
-                      entityName,
-                      entityType: 'Customer', // Defaulting, can be improved
-                      date,
-                      type,
-                      amount,
-                      paymentMode,
-                      referenceNo: 'AI-GEN',
-                      notes
-                   });
-                   showToast(`Ledger entry for ${entityName} added!`, 'success');
-                   result.message = `Ledger entry added for ${entityName}`;
-                   actionSummaries.push(`${entityName} ki ${type} entry ₹${amount} add kar di`);
+                   let customerId, vendorId, accountId;
+                   let resolvedEntity = null;
+                   
+                   if (entityType === 'Customer') {
+                      resolvedEntity = (stateRef.current.customers || []).find(c => c.name.toLowerCase() === entityName.toLowerCase());
+                      if (resolvedEntity) customerId = resolvedEntity.id;
+                   } else if (entityType === 'Vendor') {
+                      resolvedEntity = (stateRef.current.vendors || []).find(v => v.name.toLowerCase() === entityName.toLowerCase());
+                      if (resolvedEntity) vendorId = resolvedEntity.id;
+                   } else {
+                      resolvedEntity = (stateRef.current.accounts || []).find(a => a.name.toLowerCase() === entityName.toLowerCase() && a.type === entityType);
+                      if (resolvedEntity) accountId = resolvedEntity.id;
+                   }
+
+                   if (!resolvedEntity) {
+                      result.success = false;
+                      result.message = `Could not find ${entityType} named "${entityName}". You must use manage_account/manage_customer to create it first!`;
+                   } else {
+                      await addLedgerTransaction({
+                         customerId,
+                         vendorId,
+                         accountId,
+                         date,
+                         type,
+                         amount,
+                         paymentMode,
+                         referenceNo: 'AI-GEN',
+                         notes
+                      });
+                      showToast(`Ledger entry for ${entityName} added!`, 'success');
+                      result.message = `Ledger entry added for ${entityName}`;
+                      actionSummaries.push(`${entityName} ki ${type} entry ₹${amount} add kar di`);
+                   }
                 }
                 else if (call.name === 'manage_asset') {
                    const action = call.args.action || 'add';
                    const name = (call.args.name || '').trim() || 'Asset';
                    const value = Number(call.args.value) || 0;
                    const type = call.args.type || 'Fixed';
+                   let dateAcquired = undefined;
+                   if (call.args.dateAcquired) {
+                     // Attempt to parse standard date string
+                     const parsedDate = new Date(call.args.dateAcquired);
+                     if (!isNaN(parsedDate.getTime())) {
+                       dateAcquired = parsedDate.toISOString();
+                     } else {
+                       dateAcquired = call.args.dateAcquired; // fallback to raw string if parsing fails
+                     }
+                   }
 
                    let targetId = call.args.id;
                    if (!targetId && name && action !== 'add') {
@@ -996,7 +1146,7 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                    }
 
                    if (action === 'add') {
-                      await addAsset({ name, value, type });
+                      await addAsset({ name, value, type, dateAcquired: dateAcquired || new Date().toISOString() });
                       showToast(`Asset "${name}" added!`, 'success');
                       result.message = `Asset "${name}" added.`;
                       actionSummaries.push(`asset add kar diya`);
@@ -1010,6 +1160,7 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                          if (call.args.name) updateData.name = call.args.name.trim();
                          if (call.args.value !== undefined) updateData.value = Number(call.args.value) || 0;
                          if (call.args.type) updateData.type = call.args.type;
+                         if (dateAcquired) updateData.dateAcquired = dateAcquired;
                          await updateAsset(updateData);
                          showToast('Asset updated!', 'success');
                          result.message = "Asset updated.";

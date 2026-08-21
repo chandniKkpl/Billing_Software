@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useApp } from '../store/AppContext';
 import { useT } from '../i18n/translations';
 import { showToast } from '../components/Toast';
@@ -25,6 +26,18 @@ export default function Ledger() {
     { id: 'Income', icon: TrendingUp },
     { id: 'Expenditure', icon: TrendingDown },
   ];
+
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams) {
+      const tabParam = searchParams.get('tab');
+      if (tabParam && accountTypes.some(t => t.id.toLowerCase() === tabParam.toLowerCase())) {
+        const matchingTab = accountTypes.find(t => t.id.toLowerCase() === tabParam.toLowerCase());
+        setActiveTab(matchingTab.id);
+      }
+    }
+  }, [searchParams]);
 
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [vendorForm, setVendorForm] = useState({ name: '', phone: '', pan: '', gst: '', interestRate: 0, interestType: 'Monthly', balance: 0, balanceType: 'Take', fromDate: new Date().toISOString().split('T')[0], dueDate: '', notes: '', monthlySalary: '', salaryDate: '' });
