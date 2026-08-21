@@ -152,17 +152,32 @@ export default function VoiceAssistant() {
     e.stopPropagation();
     if (isSpeaking) {
       if (isSpeakingPaused) {
-        window.speechSynthesis.resume();
+        // Resume speaking
+        if (currentAudioRef.current) {
+          currentAudioRef.current.play().catch(err => console.error("Audio resume error:", err));
+        }
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.resume();
+        }
         setIsSpeakingPaused(false);
       } else {
-        window.speechSynthesis.pause();
+        // Pause speaking
+        if (currentAudioRef.current) {
+          currentAudioRef.current.pause();
+        }
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.pause();
+        }
         setIsSpeakingPaused(true);
       }
     } else if (isListening) {
+      // Pause listening
       try { recognitionRef.current.stop(); } catch(e) {}
       setIsPaused(true);
+      setIsListening(false);
       clearTimeout(silenceTimerRef.current);
     } else if (isPaused) {
+      // Resume listening
       try { recognitionRef.current.start(); } catch(e) {}
       setIsPaused(false);
     }
@@ -1287,6 +1302,7 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
     setAiText(text);
     setIsSpeaking(true);
     isSpeakingRef.current = true;
+    setIsSpeakingPaused(false);
 
     // CRITICAL: Stop speech recognition while AI is speaking
     if (recognitionRef.current) {
