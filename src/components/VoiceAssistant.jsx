@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Loader2, Volume2, X } from 'lucide-react';
+import { Mic, MicOff, Loader2, Volume2, X, Send, Play, Pause } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { useApp } from '../store/AppContext';
 import { useRouter } from 'next/navigation';
@@ -12,6 +12,8 @@ export default function VoiceAssistant() {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [isSpeakingPaused, setIsSpeakingPaused] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [aiText, setAiText] = useState('');
   const [isConversationActive, setIsConversationActive] = useState(false);
@@ -136,6 +138,8 @@ export default function VoiceAssistant() {
       isConversationActiveRef.current = true;
       setIsSpeaking(false);
       isSpeakingRef.current = false;
+      setIsPaused(false);
+      setIsSpeakingPaused(false);
       setTranscript('');
       setAiText('');
       finalTranscriptRef.current = '';
@@ -144,11 +148,43 @@ export default function VoiceAssistant() {
     }
   };
 
+  const handlePauseResume = (e) => {
+    e.stopPropagation();
+    if (isSpeaking) {
+      if (isSpeakingPaused) {
+        window.speechSynthesis.resume();
+        setIsSpeakingPaused(false);
+      } else {
+        window.speechSynthesis.pause();
+        setIsSpeakingPaused(true);
+      }
+    } else if (isListening) {
+      try { recognitionRef.current.stop(); } catch(e) {}
+      setIsPaused(true);
+      clearTimeout(silenceTimerRef.current);
+    } else if (isPaused) {
+      try { recognitionRef.current.start(); } catch(e) {}
+      setIsPaused(false);
+    }
+  };
+
+  const forceProcessNow = (e) => {
+    e.stopPropagation();
+    if (currentTranscriptRef.current.trim() && !isProcessing) {
+      try { recognitionRef.current.stop(); } catch(err) {}
+      clearTimeout(silenceTimerRef.current);
+      processVoiceCommand(currentTranscriptRef.current);
+      currentTranscriptRef.current = '';
+    }
+  };
+
   const cancelListening = () => {
     setIsConversationActive(false);
     isConversationActiveRef.current = false;
     setIsSpeaking(false);
     isSpeakingRef.current = false;
+    setIsPaused(false);
+    setIsSpeakingPaused(false);
     clearTimeout(silenceTimerRef.current);
     try { recognitionRef.current.stop(); } catch(e) {}
     setIsListening(false);
@@ -266,7 +302,8 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
      * DO NOT call 'add_product' or 'manage_product' yet!
      * If they asked to navigate, execute 'navigate_to', and in your spoken response, ASK the user for the missing selling price and stock:
        Example: "Mai inventory page par ja raha hu. Parle-G ka selling price aur stock kitna hai?"
-   - When all mandatory details are provided, call 'manage_product' with name, sellingPrice, stock, and any optional fields like barcode or gst.
+   - When all mandatory details are provided, call 'manage_product' with name, sellingPrice, stock, and any optional fields like barcode, gst, or godown.
+   - IMPORTANT: If the user asks to add/update/delete an item, ALWAYS execute the tool even if you have already done it earlier in the conversation (the user might have deleted/changed it manually).
 
 4. MANAGING CART & BILLING:
    - When user asks to add items to cart, call 'manage_cart' with the product name or ID and quantity.
@@ -349,7 +386,8 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                 stock: { type: "NUMBER", description: "Initial stock quantity (Required)" },
                 purchasePrice: { type: "NUMBER", description: "Purchase price" },
                 gst: { type: "NUMBER", description: "GST rate" },
-                barcode: { type: "STRING", description: "Barcode" }
+                barcode: { type: "STRING", description: "Barcode" },
+                godown: { type: "STRING", description: "Warehouse or Godown name (optional)" }
               },
               required: ["name", "sellingPrice", "stock"]
             }
@@ -368,7 +406,8 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                 stock: { type: "NUMBER" },
                 purchasePrice: { type: "NUMBER" },
                 gst: { type: "NUMBER" },
-                barcode: { type: "STRING" }
+                barcode: { type: "STRING" },
+                godown: { type: "STRING" }
               },
               required: ["action"]
             }
@@ -586,13 +625,14 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                    let page = (call.args.page || '').toLowerCase().trim();
                    let targetPage = `/${page}`;
                    if (page === 'dashboard' || page === 'home') targetPage = '/';
+                   else if (page.includes('purchase report') || page.includes('purchases report')) targetPage = '/reports?tab=Purchases';
+                   else if (page.includes('sales report') || page.includes('profit')) targetPage = '/reports?tab=Sales';
                    else if (page.includes('purchase')) targetPage = '/purchase';
                    else if (page.includes('bill')) targetPage = '/billing';
                    else if (page.includes('inventory')) targetPage = '/inventory';
                    else if (page.includes('customer')) targetPage = '/customers';
                    else if (page.includes('trial')) targetPage = '/reports?tab=Trial';
                    else if (page.includes('balance')) targetPage = '/reports?tab=Balance';
-                   else if (page.includes('profit') || page.includes('sales')) targetPage = '/reports?tab=Sales';
                    else if (page.includes('report')) targetPage = '/reports';
                    else if (page.includes('enquir')) targetPage = '/enquiries';
                    else if (page.includes('ledger')) targetPage = '/ledger';
@@ -620,10 +660,21 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                       result.message = `Customer "${custName}" added successfully.`;
                       actionSummaries.push(`customer "${custName}" add kar diya`);
                    } else if (action === 'update' && targetId) {
-                      await updateCustomer({ id: targetId, name, phone, address, udhaarBalance });
-                      showToast('Customer updated!', 'success');
-                      result.message = "Customer updated.";
-                      actionSummaries.push(`customer update kar diya`);
+                      const exists = (stateRef.current.customers || []).find(c => String(c.id) === String(targetId));
+                      if (!exists) {
+                         result.success = false;
+                         result.message = `Customer not found for update.`;
+                      } else {
+                         const updateData = { id: targetId };
+                         if (call.args.name) updateData.name = call.args.name.trim();
+                         if (call.args.phone) updateData.phone = call.args.phone.trim();
+                         if (call.args.address) updateData.address = call.args.address.trim();
+                         if (call.args.udhaarBalance !== undefined) updateData.udhaarBalance = Number(call.args.udhaarBalance) || 0;
+                         await updateCustomer(updateData);
+                         showToast('Customer updated!', 'success');
+                         result.message = "Customer updated.";
+                         actionSummaries.push(`customer update kar diya`);
+                      }
                    } else if (action === 'delete' && targetId) {
                       await deleteCustomer(targetId);
                       showToast('Customer deleted!', 'info');
@@ -643,6 +694,7 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                    const purchasePrice = Number(call.args.purchasePrice) || 0;
                    const gst = Number(call.args.gst) || 0;
                    const barcode = (call.args.barcode || '').trim();
+                   const godown = (call.args.godown || 'main').trim();
 
                    let targetId = call.args.id;
                    if (!targetId && name && action !== 'add') {
@@ -661,17 +713,32 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                          barcode,
                          itemType: 'Goods',
                          category: 'General',
-                         godown: 'main',
+                         godown: godown,
                          gst
                       });
                       showToast(`Product "${prodName}" added to inventory!`, 'success');
                       result.message = `Product "${prodName}" added to inventory.`;
                       actionSummaries.push(`product "${prodName}" inventory me add kar diya`);
                    } else if (action === 'update' && targetId) {
-                      await updateProduct({ id: targetId, name, sellingPrice, mrp, stock, purchasePrice, gst, barcode });
-                      showToast('Product updated!', 'success');
-                      result.message = "Product updated.";
-                      actionSummaries.push(`product update kar diya`);
+                      const exists = (stateRef.current.products || []).find(p => String(p.id) === String(targetId));
+                      if (!exists) {
+                         result.success = false;
+                         result.message = `Product not found for update.`;
+                      } else {
+                         const updateData = { id: targetId };
+                         if (call.args.name) updateData.name = call.args.name.trim();
+                         if (call.args.sellingPrice !== undefined) updateData.sellingPrice = Number(call.args.sellingPrice) || 0;
+                         if (call.args.mrp !== undefined) updateData.mrp = Number(call.args.mrp) || 0;
+                         if (call.args.stock !== undefined) updateData.stock = Number(call.args.stock) || 0;
+                         if (call.args.purchasePrice !== undefined) updateData.purchasePrice = Number(call.args.purchasePrice) || 0;
+                         if (call.args.gst !== undefined) updateData.gst = Number(call.args.gst) || 0;
+                         if (call.args.barcode) updateData.barcode = call.args.barcode.trim();
+                         if (call.args.godown) updateData.godown = call.args.godown.trim();
+                         await updateProduct(updateData);
+                         showToast('Product updated!', 'success');
+                         result.message = "Product updated.";
+                         actionSummaries.push(`product update kar diya`);
+                      }
                    } else if (action === 'delete' && targetId) {
                       await deleteProduct(targetId);
                       showToast('Product deleted!', 'info');
@@ -868,10 +935,21 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                       result.message = `Enquiry for "${name}" added.`;
                       actionSummaries.push(`enquiry add kar di`);
                    } else if (action === 'update' && targetId) {
-                      await updateEnquiry({ id: targetId, name, phone, itemOfInterest, notes });
-                      showToast('Enquiry updated!', 'success');
-                      result.message = "Enquiry updated.";
-                      actionSummaries.push(`enquiry update kar di`);
+                      const exists = (stateRef.current.enquiries || []).find(e => String(e.id) === String(targetId));
+                      if (!exists) {
+                         result.success = false;
+                         result.message = `Enquiry not found for update.`;
+                      } else {
+                         const updateData = { id: targetId };
+                         if (call.args.name) updateData.name = call.args.name.trim();
+                         if (call.args.phone) updateData.phone = call.args.phone.trim();
+                         if (call.args.itemOfInterest) updateData.itemOfInterest = call.args.itemOfInterest.trim();
+                         if (call.args.notes) updateData.notes = call.args.notes.trim();
+                         await updateEnquiry(updateData);
+                         showToast('Enquiry updated!', 'success');
+                         result.message = "Enquiry updated.";
+                         actionSummaries.push(`enquiry update kar di`);
+                      }
                    } else if (action === 'delete' && targetId) {
                       await deleteEnquiry(targetId);
                       showToast('Enquiry deleted!', 'info');
@@ -923,10 +1001,20 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                       result.message = `Asset "${name}" added.`;
                       actionSummaries.push(`asset add kar diya`);
                    } else if (action === 'update' && targetId) {
-                      await updateAsset({ id: targetId, name, value, type });
-                      showToast('Asset updated!', 'success');
-                      result.message = "Asset updated.";
-                      actionSummaries.push(`asset update kar diya`);
+                      const exists = (stateRef.current.assets || []).find(a => String(a.id) === String(targetId));
+                      if (!exists) {
+                         result.success = false;
+                         result.message = `Asset not found for update.`;
+                      } else {
+                         const updateData = { id: targetId };
+                         if (call.args.name) updateData.name = call.args.name.trim();
+                         if (call.args.value !== undefined) updateData.value = Number(call.args.value) || 0;
+                         if (call.args.type) updateData.type = call.args.type;
+                         await updateAsset(updateData);
+                         showToast('Asset updated!', 'success');
+                         result.message = "Asset updated.";
+                         actionSummaries.push(`asset update kar diya`);
+                      }
                    } else if (action === 'delete' && targetId) {
                       await deleteAsset(targetId);
                       showToast('Asset deleted!', 'info');
@@ -954,10 +1042,19 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                       result.message = `Warehouse "${name}" added.`;
                       actionSummaries.push(`warehouse "${name}" add kar diya`);
                    } else if (action === 'update' && targetId) {
-                      await updateWarehouse({ id: targetId, name, address });
-                      showToast('Warehouse updated!', 'success');
-                      result.message = "Warehouse updated.";
-                      actionSummaries.push(`warehouse update kar diya`);
+                      const exists = (stateRef.current.warehouses || []).find(w => String(w.id) === String(targetId));
+                      if (!exists) {
+                         result.success = false;
+                         result.message = `Warehouse not found for update.`;
+                      } else {
+                         const updateData = { id: targetId };
+                         if (call.args.name) updateData.name = call.args.name.trim();
+                         if (call.args.address) updateData.address = call.args.address.trim();
+                         await updateWarehouse(updateData);
+                         showToast('Warehouse updated!', 'success');
+                         result.message = "Warehouse updated.";
+                         actionSummaries.push(`warehouse update kar diya`);
+                      }
                    } else if (action === 'delete' && targetId) {
                       await deleteWarehouse(targetId);
                       showToast('Warehouse deleted!', 'info');
@@ -1181,15 +1278,17 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
         @keyframes spin { 100% { transform: rotate(360deg); } }
         @keyframes pulseAnim { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
       `}</style>
-      <div className="va-container">
-        {(isConversationActive || isProcessing || isSpeaking || transcript) && (
+        <div className="va-container">
+        {(isConversationActive || isProcessing || isSpeaking || transcript || isPaused) && (
           <div className="va-tooltip">
-            {isListening && !isSpeaking && <span className="va-status-text pulse" style={{color: '#3b82f6'}}><Mic size={16}/> Sun raha hu...</span>}
+            {isListening && !isSpeaking && !isPaused && <span className="va-status-text pulse" style={{color: '#3b82f6'}}><Mic size={16}/> Sun raha hu...</span>}
+            {isPaused && <span className="va-status-text" style={{color: '#8b5cf6'}}><Pause size={16}/> Paused</span>}
             {isProcessing && <span className="va-status-text" style={{color: '#f59e0b'}}><Loader2 className="spin" size={16}/> Samajh raha hu...</span>}
-            {isSpeaking && <span className="va-status-text" style={{color: '#10b981'}}><Volume2 size={16}/> Bol raha hu...</span>}
+            {isSpeaking && !isSpeakingPaused && <span className="va-status-text" style={{color: '#10b981'}}><Volume2 size={16}/> Bol raha hu...</span>}
+            {isSpeaking && isSpeakingPaused && <span className="va-status-text" style={{color: '#8b5cf6'}}><Volume2 size={16}/> Paused (Speaking)</span>}
             
             {/* Show what user said */}
-            {!isListening && !isProcessing && transcript && !isSpeaking && (
+            {(!isListening || isPaused) && !isProcessing && transcript && !isSpeaking && (
               <div className="va-transcript">
                   👤 "{transcript}"
               </div>
@@ -1202,17 +1301,31 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
                </div>
             )}
             
-            {/* Cancel Button */}
-            {(isListening || isProcessing || isSpeaking) && (
-               <div style={{ marginTop: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '8px', display: 'flex', justifyContent: 'center' }}>
-                 <button 
-                   onClick={(e) => { e.stopPropagation(); cancelListening(); }} 
-                   style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
-                 >
-                   <X size={14} /> Cancel Request
+            {/* Actions Row */}
+            <div style={{ marginTop: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '8px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
+               
+               {/* Process Now Action */}
+               {isListening && !isSpeaking && transcript && (
+                 <button onClick={forceProcessNow} style={{ background: '#3b82f6', borderRadius: '4px', padding: '4px 8px', border: 'none', color: 'white', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                   <Send size={12} /> Bhejo
                  </button>
-               </div>
-            )}
+               )}
+
+               {/* Pause / Resume Action */}
+               {(isListening || isPaused || isSpeaking) && (
+                 <button onClick={handlePauseResume} style={{ background: '#f59e0b', borderRadius: '4px', padding: '4px 8px', border: 'none', color: 'white', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                   {(isPaused || isSpeakingPaused) ? <Play size={12} /> : <Pause size={12} />} 
+                   {(isPaused || isSpeakingPaused) ? "Resume" : "Pause"}
+                 </button>
+               )}
+
+               {/* Cancel Action */}
+               {(isConversationActive || isProcessing || isSpeaking) && (
+                 <button onClick={(e) => { e.stopPropagation(); cancelListening(); }} style={{ background: 'transparent', border: '1px solid #ef4444', borderRadius: '4px', padding: '4px 8px', color: '#ef4444', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                   <X size={12} /> Cancel
+                 </button>
+               )}
+            </div>
           </div>
         )}
 

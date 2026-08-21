@@ -1,5 +1,6 @@
 "use client";
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { useApp } from '../store/AppContext';
 import { useT } from '../i18n/translations';
 import {
@@ -9,7 +10,6 @@ import {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const { state, dispatch } = useApp();
   const tx = useT(state.lang);
 
@@ -38,9 +38,6 @@ export default function Sidebar() {
     { id: '/settings', label: tx.settings || 'Settings', icon: Globe },
   ];
 
-  const handleNavClick = (id) => {
-    router.push(id);
-  };
 
   return (
     <>
@@ -52,10 +49,11 @@ export default function Sidebar() {
 
         <nav className="sidebar-nav">
           {navItems.map(({ id, label, icon: Icon }) => (
-            <div
+            <Link
               key={id}
+              href={id}
               className={`nav-item ${pathname === id ? 'active' : ''}`}
-              onClick={() => handleNavClick(id)}
+              style={{ textDecoration: 'none' }}
             >
               <Icon size={18} />
               <span>{label}</span>
@@ -69,7 +67,7 @@ export default function Sidebar() {
                   {dueVendors} Due
                 </span>
               )}
-            </div>
+            </Link>
           ))}
         </nav>
 

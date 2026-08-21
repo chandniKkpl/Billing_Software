@@ -262,7 +262,7 @@ export function AppProvider({ children }) {
       }
     }
     
-    await batch.commit();
+    batch.commit().catch(e => console.error('Batch error:', e));
   };
 
   const addProduct = async (product) => {
@@ -282,7 +282,7 @@ export function AppProvider({ children }) {
       const id = p.id || Date.now().toString() + Math.random().toString(36).substr(2, 5);
       batch.set(doc(db, 'products', String(id)), { ...p, id }, { merge: true });
     });
-    await batch.commit();
+    batch.commit().catch(e => console.error('Batch error:', e));
   };
 
   const completeSale = async (sale) => {
@@ -345,7 +345,7 @@ export function AppProvider({ children }) {
     const cleanSale = JSON.parse(JSON.stringify(sale, (k, v) => (v === undefined ? null : v)));
     batch.set(doc(db, 'sales', String(sale.id)), cleanSale);
     
-    await batch.commit();
+    batch.commit().catch(e => console.error('Batch error:', e));
     dispatch({ type: 'CLEAR_CART' });
   };
 
@@ -438,7 +438,7 @@ export function AppProvider({ children }) {
 
     // Save purchase record
     batch.set(doc(db, 'purchases', String(purchase.id)), purchase);
-    await batch.commit();
+    batch.commit().catch(e => console.error('Batch error:', e));
     dispatch({ type: 'CLEAR_CART' });
   };
 
@@ -459,7 +459,7 @@ export function AppProvider({ children }) {
     });
     
     batch.delete(doc(db, 'sales', String(saleId)));
-    await batch.commit();
+    batch.commit().catch(e => console.error('Batch error:', e));
   };
 
   const updatePurchase = async (purchaseId, updatedData) => {
@@ -479,7 +479,7 @@ export function AppProvider({ children }) {
     });
     
     batch.delete(doc(db, 'purchases', String(purchaseId)));
-    await batch.commit();
+    batch.commit().catch(e => console.error('Batch error:', e));
   };
 
   const setLang = (l) => dispatch({ type: 'SET_LANG', payload: l });

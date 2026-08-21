@@ -388,6 +388,7 @@ Each item in the array must have:
                     <th style={{ padding: '10px 15px' }}>Bill No.</th>
                     <th style={{ padding: '10px 15px' }}>Vendor</th>
                     <th style={{ padding: '10px 15px' }}>Store</th>
+                    <th style={{ padding: '10px 15px', width: '25%' }}>Items</th>
                     <th style={{ padding: '10px 15px', textAlign: 'right' }}>Total (₹)</th>
                     <th style={{ padding: '10px 15px' }}>Payment</th>
                     <th style={{ padding: '10px 15px', textAlign: 'right' }}>Actions</th>
@@ -407,6 +408,16 @@ Each item in the array must have:
                         <td style={{ padding: '12px 15px', fontWeight: 'bold' }}>{p.purchaseBillNo || '-'}</td>
                         <td style={{ padding: '12px 15px' }}>{vendor ? vendor.name : 'Walk-in Vendor'}</td>
                         <td style={{ padding: '12px 15px' }}>{store}</td>
+                        <td style={{ padding: '12px 15px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '100px', overflowY: 'auto' }}>
+                            {(p.items || []).map((item, idx) => (
+                               <div key={idx} style={{ fontSize: '0.75rem', color: '#475569', background: '#f1f5f9', padding: '3px 6px', borderRadius: '4px' }}>
+                                 {item.name} <strong>x{item.qty}</strong> @ ₹{item.purchasePrice || 0}
+                                 {item.mrp ? ` (MRP: ₹${item.mrp})` : ''}
+                               </div>
+                            ))}
+                          </div>
+                        </td>
                         <td style={{ padding: '12px 15px', textAlign: 'right', fontWeight: 'bold', color: 'var(--primary)' }}>{p.grandTotal?.toFixed(2)}</td>
                         <td style={{ padding: '12px 15px' }}>
                           <span className={`badge ${p.paymentMode === 'Credit' ? 'badge-red' : 'badge-green'}`}>
