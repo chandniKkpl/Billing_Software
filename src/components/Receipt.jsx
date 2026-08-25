@@ -153,7 +153,7 @@ export default function Receipt({ sale: initialSale, onClose, setPage }) {
   if (!sale) return null;
 
   const storeInfo = { 
-    name: 'Well Pharmacy', 
+    name: 'Billing Software', 
     address: 'Shop No 1. Grover Market, Near azad chowk, Rewari 123401', 
     phone: 'Mob no- 7015167948.'
   };

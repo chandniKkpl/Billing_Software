@@ -803,21 +803,39 @@ CRITICAL MANDATORY INFORMATION & CONVERSATIONAL RULES:
 
                    if (action === 'add' || call.name === 'add_product') {
                       const prodName = name || 'Naya Product';
-                      await addProduct({
-                         name: prodName,
-                         sellingPrice,
-                         mrp,
-                         purchasePrice,
-                         stock,
-                         barcode,
-                         itemType: 'Goods',
-                         category: 'General',
-                         godown: godown,
-                         gst
-                      });
-                      showToast(`Product "${prodName}" added to inventory!`, 'success');
-                      result.message = `Product "${prodName}" added to inventory.`;
-                      actionSummaries.push(`product "${prodName}" inventory me add kar diya`);
+                      
+                      const existingProd = (stateRef.current.products || []).find(p => 
+                        p.name.toLowerCase() === prodName.toLowerCase() && 
+                        (sellingPrice === 0 || p.sellingPrice === sellingPrice)
+                      );
+
+                      if (existingProd) {
+                        const newStock = (Number(existingProd.stock) || 0) + stock;
+                        const whStock = { ...(existingProd.warehouseStock || {}) };
+                        whStock[godown] = (whStock[godown] || 0) + stock;
+                        
+                        await updateProduct({ id: existingProd.id, stock: newStock, warehouseStock: whStock });
+                        showToast(`Updated stock for "${prodName}"!`, 'success');
+                        result.message = `Product "${prodName}" already existed. Added ${stock} to stock.`;
+                        actionSummaries.push(`product "${prodName}" ka stock badha diya`);
+                      } else {
+                        await addProduct({
+                           name: prodName,
+                           sellingPrice,
+                           mrp,
+                           purchasePrice,
+                           stock,
+                           warehouseStock: { [godown]: stock },
+                           barcode,
+                           itemType: 'Goods',
+                           category: 'General',
+                           godown: godown,
+                           gst
+                        });
+                        showToast(`Product "${prodName}" added to inventory!`, 'success');
+                        result.message = `Product "${prodName}" added to inventory.`;
+                        actionSummaries.push(`product "${prodName}" inventory me add kar diya`);
+                      }
                    } else if (action === 'update' && targetId) {
                       const exists = (stateRef.current.products || []).find(p => String(p.id) === String(targetId));
                       if (!exists) {

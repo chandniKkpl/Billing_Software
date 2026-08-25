@@ -5,7 +5,8 @@ export default function ProductSearch({
   search, setSearch,
   barcode, setBarcode,
   barcodeRef, handleBarcodeKey, handleBarcodeSubmit,
-  filtered, addToCart, lastSoldPrices
+  filtered, addToCart, lastSoldPrices,
+  warehouseId
 }) {
   return (
     <div className="billing-left">
@@ -39,15 +40,17 @@ export default function ProductSearch({
         </div>
 
         <div className="product-grid">
-          {filtered.map(p => (
+          {filtered.map(p => {
+            const displayStock = warehouseId === 'All' ? (p.stock || 0) : (p.warehouseStock?.[warehouseId] || 0);
+            return (
             <div
               key={p.id}
-              className={`product-chip ${!p.stock || p.stock <= 0 ? 'oos' : ''}`}
+              className={`product-chip ${displayStock <= 0 ? 'oos' : ''}`}
               onClick={() => addToCart(p)}
               title={p.barcode}
             >
-              <span className={`product-chip-stock badge ${p.stock <= 0 ? 'badge-red' : p.stock <= 5 ? 'badge-yellow' : 'badge-green'}`}>
-                {p.stock <= 0 ? '✕' : p.stock}
+              <span className={`product-chip-stock badge ${displayStock <= 0 ? 'badge-red' : displayStock <= 5 ? 'badge-yellow' : 'badge-green'}`}>
+                {displayStock <= 0 ? '✕' : displayStock}
               </span>
               <div className="product-chip-name">{p.name}</div>
               <div className="product-chip-brand">{p.brand}</div>
@@ -58,7 +61,8 @@ export default function ProductSearch({
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
           {filtered.length === 0 && (
             <div style={{ gridColumn: '1/-1', textAlign: 'center', color: 'var(--text3)', padding: '40px 0', fontSize: '0.85rem' }}>
               No products found

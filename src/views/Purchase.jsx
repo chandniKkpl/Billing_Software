@@ -41,7 +41,7 @@ function calcTotals(cart, billDiscount = { type: 'none', value: 0 }) {
 }
 
 export default function Purchase() {
-  const { state, dispatch, completePurchase, addVendor, deletePurchase } = useApp();
+  const { state, dispatch, completePurchase, addVendor, deletePurchase, addProduct } = useApp();
   const tx = useT(state.lang);
   const [view, setView] = useState('list'); // 'list' or 'form'
   const [listSearch, setListSearch] = useState('');
@@ -170,7 +170,7 @@ export default function Purchase() {
       gst: parseFloat(productForm.gst) || 0,
       category: 'General'
     };
-    dispatch({ type: 'ADD_PRODUCT', payload: newProduct });
+    await addProduct(newProduct);
     
     // Auto add to cart if stock > 0, else we just add it to cart with qty=1 anyway for purchase
     dispatch({ type: 'ADD_TO_CART', payload: { ...newProduct, qty: 1 } });
@@ -180,24 +180,46 @@ export default function Purchase() {
 
   const processParsedItems = (items) => {
     let count = 0;
+    let addedProductsCount = 0;
     items.forEach((item, idx) => {
       if (!item.name) return;
-      const existingProd = state.products?.find(p => p.name.toLowerCase().trim() === item.name.toLowerCase().trim());
+      let existingProd = state.products?.find(p => p.name.toLowerCase().trim() === item.name.toLowerCase().trim());
+      
+      if (!existingProd) {
+        // Create new product if it doesn't exist
+        existingProd = {
+          id: `prod_${Date.now()}_${idx}`,
+          name: item.name,
+          brand: '',
+          barcode: '',
+          sellingPrice: item.sp || item.purchasePrice || 0,
+          mrp: item.mrp || item.purchasePrice || 0,
+          purchasePrice: item.purchasePrice || 0,
+          stock: 0,
+          gst: item.gst || 0,
+          category: 'General'
+        };
+        addProduct(existingProd);
+        addedProductsCount++;
+      }
       
       const cartItem = {
-        id: existingProd ? existingProd.id : `tmp_${Date.now()}_${idx}`,
-        name: existingProd ? existingProd.name : item.name,
-        sellingPrice: item.purchasePrice || existingProd?.purchasePrice || 0,
-        mrp: existingProd?.mrp || 0,
+        id: existingProd.id,
+        name: existingProd.name,
+        sellingPrice: existingProd.purchasePrice || item.purchasePrice || 0,
+        mrp: existingProd.mrp || item.mrp || 0,
         qty: parseFloat(item.qty) || 1,
-        unit: existingProd?.unit || 'Pcs',
-        gst: existingProd?.gst || 0
+        unit: existingProd.unit || 'Pcs',
+        gst: existingProd.gst || item.gst || 0
       };
       
       dispatch({ type: 'ADD_TO_CART', payload: cartItem });
       count++;
     });
-    showToast(`Added ${count} items from bill!`, 'success');
+    
+    let msg = `Added ${count} items to cart!`;
+    if (addedProductsCount > 0) msg += ` (Created ${addedProductsCount} new products)`;
+    showToast(msg, 'success');
   };
 
   const handleFileUpload = async (e) => {
@@ -214,12 +236,69 @@ export default function Purchase() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = XLSX.utils.sheet_to_json(ws);
         
-        const items = data.map(r => ({
-          name: r.Name || r.Item || r.Product || r.Description,
-          qty: parseFloat(r.Qty || r.Quantity || 1),
-          purchasePrice: parseFloat(r.Rate || r.Price || r.Amount || r.Unit_Price || 0)
-        }));
-        processParsedItems(items);
+        const items = data.map(r => {
+          const keys = Object.keys(r);
+          
+          // exact match helper
+          const getExact = (possibleKeys) => {
+            for (let pk of possibleKeys) {
+              const match = keys.find(k => k.toLowerCase().trim() === pk.toLowerCase());
+              if (match) return r[match];
+            }
+            return null;
+          };
+          
+          // partial match helper
+          const getPartial = (possibleKeys, excludeKeys = []) => {
+            for (let pk of possibleKeys) {
+              const match = keys.find(k => {
+                const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const cleanPk = pk.toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (cleanK.includes(cleanPk)) {
+                  // check exclusions
+                  for (let ex of excludeKeys) {
+                    if (cleanK.includes(ex.toLowerCase().replace(/[^a-z0-9]/g, ''))) return false;
+                  }
+                  return true;
+                }
+                return false;
+              });
+              if (match) return r[match];
+            }
+            return null;
+          };
+          
+          let name = getPartial(['item name', 'product name']) || 
+                     getExact(['item', 'product', 'name', 'particulars', 'description']) || 
+                     getPartial(['item', 'product', 'particular', 'desc'], ['vendor', 'customer', 'shop', 'company']) || 
+                     r['Customer'];
+                     
+          let qty = getExact(['qty', 'quantity']) || getPartial(['qty', 'quantity']);
+          
+          let purchasePrice = getExact(['rate', 'pp', 'purchase price', 'cost']) || 
+                              getPartial(['rate', 'pp', 'purchaseprice', 'cost']) ||
+                              getExact(['price', 'amount', 'unit price']) ||
+                              getPartial(['price', 'amount', 'unit']);
+
+          let mrp = getExact(['mrp']) || getPartial(['mrp']);
+          let sp = getExact(['sp', 'selling price', 'sale price']) || getPartial(['sp', 'sellingprice']);
+          let gst = getExact(['gst', 'tax', 'cgst', 'sgst', 'igst']) || getPartial(['gst', 'tax']);
+
+          return {
+            name,
+            qty: parseFloat(qty || 1),
+            purchasePrice: parseFloat(purchasePrice || 0),
+            mrp: parseFloat(mrp || 0),
+            sp: parseFloat(sp || 0),
+            gst: parseFloat(gst || 0)
+          };
+        }).filter(item => item.name);
+        
+        if (items.length === 0) {
+          showToast('Could not find item data in CSV. Check column names.', 'error');
+        } else {
+          processParsedItems(items);
+        }
       } else if (file.type.startsWith('image/') || file.type === 'application/pdf') {
         const reader = new FileReader();
         reader.readAsDataURL(file);

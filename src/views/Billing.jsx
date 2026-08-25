@@ -37,7 +37,10 @@ export default function Billing() {
 
   const selectedCustomer = state.customers?.find(c => c.id === selectedCustomerId);
   const warehouses = state.warehouses || [];
-  const displayWarehouses = warehouses.some(w => w.id === 'main') ? warehouses : [{id: 'main', name: 'Main Store'}, ...warehouses];
+  const displayWarehouses = [
+    { id: 'All', name: 'All Warehouses (Total)' },
+    ...(warehouses.some(w => w.id === 'main') ? warehouses : [{id: 'main', name: 'Main Store'}, ...warehouses])
+  ];
 
   useEffect(() => {
     if (selectedCustomer && selectedCustomer.type === 'old') {
@@ -58,6 +61,32 @@ export default function Billing() {
     });
     return prices;
   }, [state.sales, selectedCustomerId]);
+
+  const getAvailableStock = (prod) => {
+    if (!prod) return 0;
+    return warehouseId === 'All' ? (prod.stock || 0) : (prod.warehouseStock?.[warehouseId] || 0);
+  };
+
+  useEffect(() => {
+    let adjusted = false;
+    state.cart.forEach(item => {
+      const prod = state.products.find(p => p.id === item.id);
+      if (prod) {
+        const available = getAvailableStock(prod);
+        if (item.qty > available) {
+          if (available === 0) {
+            dispatch({ type: 'REMOVE_FROM_CART', payload: item.id });
+          } else {
+            dispatch({ type: 'UPDATE_CART_ITEM', payload: { id: item.id, qty: available } });
+          }
+          adjusted = true;
+        }
+      }
+    });
+    if (adjusted) {
+      showToast('Cart adjusted due to warehouse stock limits', 'info');
+    }
+  }, [warehouseId]); // only run when warehouseId changes
 
   const startEditTotal = (item) => {
     setEditingTotal({ id: item.id, value: (item.sellingPrice * item.qty).toFixed(0) });
@@ -109,8 +138,12 @@ export default function Billing() {
     if (!code) return;
     const product = state.products.find(p => p.barcode === code);
     if (product) {
-      if (product.stock <= 0) {
-        showToast('Out of stock!', 'error');
+      const available = getAvailableStock(product);
+      const existing = state.cart.find(c => c.id === product.id);
+      const newQty = (existing ? existing.qty : 0) + 1;
+      
+      if (available <= 0 || newQty > available) {
+        showToast('Out of stock in selected warehouse!', 'error');
       } else {
         dispatch({ type: 'ADD_TO_CART', payload: product });
         showToast(`${product.name} Added!`, 'success');
@@ -123,7 +156,14 @@ export default function Billing() {
   };
 
   const addToCart = (product) => {
-    if (!product.stock || product.stock <= 0) { showToast('Out of stock!', 'error'); return; }
+    const available = getAvailableStock(product);
+    const existing = state.cart.find(c => c.id === product.id);
+    const newQty = (existing ? existing.qty : 0) + 1;
+    
+    if (available <= 0 || newQty > available) {
+      showToast('Out of stock in selected warehouse!', 'error');
+      return;
+    }
     dispatch({ type: 'ADD_TO_CART', payload: product });
     showToast(`${product.name} added!`, 'info');
   };
@@ -135,7 +175,13 @@ export default function Billing() {
     if (newQty <= 0) dispatch({ type: 'REMOVE_FROM_CART', payload: id });
     else {
       const prod = state.products.find(p => p.id === id);
-      if (prod && newQty > prod.stock) { showToast('Not enough stock!', 'error'); return; }
+      if (prod) {
+        const available = getAvailableStock(prod);
+        if (newQty > available) {
+          showToast('Not enough stock in selected warehouse!', 'error');
+          return;
+        }
+      }
       dispatch({ type: 'UPDATE_CART_ITEM', payload: { id, qty: newQty } });
     }
   };
@@ -145,6 +191,7 @@ export default function Billing() {
 
   const generateBill = async () => {
     if (state.cart.length === 0) { showToast('Cart is empty!', 'error'); return; }
+    if (warehouseId === 'All') { showToast('Please select a specific warehouse to dispatch from!', 'error'); return; }
 
     try {
       const sale = buildSalePayload({
@@ -193,6 +240,7 @@ export default function Billing() {
             handleBarcodeSubmit={handleBarcodeSubmit}
             filtered={filtered} addToCart={addToCart}
             lastSoldPrices={lastSoldPrices}
+            warehouseId={warehouseId}
           />
 
           <div className="billing-right">
