@@ -43,7 +43,7 @@ export default function CustomerModal({ show, editingCustomer, formData, setForm
           </div>
           <div className="form-group">
             <label className="form-label">Initial Debt Balance (₹)</label>
-            <input className="form-input" type="number" step="any" value={formData.udhaarBalance} onChange={e => setFormData({ ...formData, udhaarBalance: e.target.value })} disabled={!!editingCustomer} />
+            <input className="form-input" type="number" min="0" step="any" value={formData.udhaarBalance} onChange={e => setFormData({ ...formData, udhaarBalance: Math.max(0, e.target.value) })} disabled={!!editingCustomer} />
           </div>
           <div className="form-group">
             <label className="form-label">Payment Due Date</label>

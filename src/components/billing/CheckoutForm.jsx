@@ -31,11 +31,12 @@ export default function CheckoutForm({
           {billDiscount.type !== 'none' && (
             <input 
               type="number" 
+              min="0"
               className="form-input" 
               style={{ flex: 1, padding: '6px' }}
               placeholder="Value"
               value={billDiscount.value || ''}
-              onChange={e => setBillDiscount({ ...billDiscount, value: e.target.value })}
+              onChange={e => setBillDiscount({ ...billDiscount, value: Math.max(0, e.target.value) })}
             />
           )}
         </div>
@@ -49,11 +50,11 @@ export default function CheckoutForm({
       <div style={{ display: 'flex', gap: '10px', marginTop: '10px', marginBottom: '10px' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '0.78rem', color: 'var(--text3)', marginBottom: '4px' }}>Freight/Shipping</div>
-          <input type="number" className="form-input" placeholder="0.00" value={billDiscount.freight} onChange={e => setBillDiscount({ ...billDiscount, freight: e.target.value })} />
+          <input type="number" min="0" className="form-input" placeholder="0.00" value={billDiscount.freight} onChange={e => setBillDiscount({ ...billDiscount, freight: Math.max(0, e.target.value) })} />
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '0.78rem', color: 'var(--text3)', marginBottom: '4px' }}>Labor Charges</div>
-          <input type="number" className="form-input" placeholder="0.00" value={billDiscount.labor} onChange={e => setBillDiscount({ ...billDiscount, labor: e.target.value })} />
+          <input type="number" min="0" className="form-input" placeholder="0.00" value={billDiscount.labor} onChange={e => setBillDiscount({ ...billDiscount, labor: Math.max(0, e.target.value) })} />
         </div>
       </div>
 
@@ -62,10 +63,11 @@ export default function CheckoutForm({
         <div style={{ fontSize: '0.78rem', color: 'var(--text3)', marginBottom: '4px' }}>Target Total (Round Off)</div>
         <input 
           type="number" 
+          min="0"
           className="form-input" 
           placeholder="e.g. 125"
           value={roundOff} 
-          onChange={e => setRoundOff(e.target.value)}
+          onChange={e => setRoundOff(Math.max(0, e.target.value))}
           style={{ width: '100%' }}
         />
       </div>
